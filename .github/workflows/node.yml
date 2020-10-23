@@ -1,0 +1,44 @@
+name: Node
+
+on:
+  push:
+    branches: [ master ]
+    paths-ignore: ['swift/**', '*.podspec']
+  pull_request:
+    branches: [ master ]
+    paths-ignore: ['swift/**', '*.podspec']
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Install nightly rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: nightly
+        override: true
+        profile: minimal
+    - uses: actions/checkout@v2
+    - name: Get Node version
+      id: get-node-version
+      run: echo -n "::set-output name=node-version::" && cat .nvmrc
+    - uses: actions/setup-node@v1
+      with:
+        node-version: "${{ steps.get-node-version.outputs.node-version }}"
+    - name: Install dependencies
+      run: yarn install
+    - name: Yarn lint
+      run: yarn lint
+    - name: Yarn format
+      run: yarn format -c
+    - name: Yarn build
+      run: yarn build
+    - name: Yarn test
+      uses: GabrielBB/xvfb-action@v1.4
+      with:
+        # The tests use an Electron-based runner, so we need to set up a dummy display for them.
+        run: yarn test
