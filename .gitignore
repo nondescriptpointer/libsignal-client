@@ -4,6 +4,7 @@ Cargo.lock
 /swift/.build
 /node/dist
 /node_modules
+/build
 
 *~
 \#*\#
