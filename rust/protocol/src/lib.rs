@@ -9,7 +9,7 @@
 mod address;
 mod consts;
 mod crypto;
-mod curve;
+pub mod curve;
 mod error;
 mod fingerprint;
 mod group_cipher;

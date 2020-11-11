@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 
-mod curve25519;
+pub mod curve25519;
 
 use crate::error::{Result, SignalProtocolError};
 
