@@ -3,10 +3,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 
+use futures::pin_mut;
+use futures::task::noop_waker_ref;
 use libc::{c_char, c_uchar, c_uint, c_ulonglong, size_t};
 use libsignal_protocol_rust::*;
 use std::ffi::{CStr, CString};
 use std::fmt;
+use std::future::Future;
+use std::task::{self, Poll};
 
 #[derive(Debug)]
 pub enum SignalFfiError {
@@ -188,6 +192,15 @@ pub fn run_ffi_safe<F: FnOnce() -> Result<(), SignalFfiError> + std::panic::Unwi
     }
 }
 
+#[track_caller]
+pub fn expect_ready<F: Future>(future: F) -> F::Output {
+    pin_mut!(future);
+    match future.poll(&mut task::Context::from_waker(noop_waker_ref())) {
+        Poll::Ready(result) => result,
+        Poll::Pending => panic!("future was not ready"),
+    }
+}
+
 pub unsafe fn box_object<T>(
     p: *mut *mut T,
     obj: Result<T, SignalProtocolError>,
@@ -276,6 +289,14 @@ pub unsafe fn native_handle_cast<T>(handle: *const T) -> Result<&'static T, Sign
     }
 
     Ok(&*(handle))
+}
+
+pub unsafe fn native_handle_cast_mut<T>(handle: *mut T) -> Result<&'static mut T, SignalFfiError> {
+    if handle.is_null() {
+        return Err(SignalFfiError::NullPointer);
+    }
+
+    Ok(&mut *handle)
 }
 
 pub unsafe fn get_optional_uint32(p: *const c_uint) -> Option<u32> {

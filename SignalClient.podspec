@@ -18,10 +18,17 @@ Pod::Spec.new do |s|
   s.osx.deployment_target  = '10.9'
 
   s.source_files = 'swift/Sources/**/*.swift'
-  s.preserve_paths = ['rust/*', 'Cargo.toml', 'Cargo.lock', 'swift/Sources/SignalFfi', 'bin/*']
+  s.preserve_paths = [
+    'bin/*',
+    'Cargo.toml',
+    'Cargo.lock',
+    'rust-toolchain',
+    'rust/*',
+    'swift/*.sh',
+    'swift/Sources/SignalFfi',
+  ]
 
   s.pod_target_xcconfig = {
-      'RUSTUP_TOOLCHAIN' => 'nightly',
       'CARGO_BUILD_TARGET_DIR' => '$(DERIVED_FILE_DIR)/libsignal-ffi',
       'LIBSIGNAL_FFI_DIR' => '$(CARGO_BUILD_TARGET_DIR)/$(CARGO_BUILD_TARGET)/release',
 
@@ -43,7 +50,7 @@ Pod::Spec.new do |s|
   s.script_phases = [
     { :name => 'Build libsignal-ffi',
       :execution_position => :before_compile,
-      :script => '${PODS_TARGET_SRCROOT}/bin/build-ffi',
+      :script => '"${PODS_TARGET_SRCROOT}/swift/build_ffi.sh"',
     }
   ]
 

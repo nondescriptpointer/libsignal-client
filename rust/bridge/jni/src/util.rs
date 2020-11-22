@@ -3,12 +3,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 
+use futures::pin_mut;
+use futures::task::noop_waker_ref;
 use jni::objects::{JObject, JString, JThrowable, JValue};
 use jni::sys::{_jobject, jboolean, jbyteArray, jint, jlong, jobject, jstring};
 use jni::JNIEnv;
 use libsignal_protocol_rust::SignalProtocolError;
 use std::convert::TryFrom;
 use std::fmt;
+use std::future::Future;
+use std::task::{self, Poll};
 
 #[derive(Debug)]
 pub enum SignalJniError {
@@ -234,6 +238,15 @@ where
             throw_error(env, SignalJniError::UnexpectedPanic(r));
             R::dummy_value()
         }
+    }
+}
+
+#[track_caller]
+pub fn expect_ready<F: Future>(future: F) -> F::Output {
+    pin_mut!(future);
+    match future.poll(&mut task::Context::from_waker(noop_waker_ref())) {
+        Poll::Ready(result) => result,
+        Poll::Pending => panic!("future was not ready"),
     }
 }
 
@@ -478,7 +491,7 @@ pub fn jobject_from_native_handle<'a>(
 macro_rules! jni_fn_deserialize {
     ( $nm:ident is $func:path ) => {
         #[no_mangle]
-        pub unsafe extern "system" fn $nm(
+        pub unsafe extern "C" fn $nm(
             env: JNIEnv,
             _class: JClass,
             data: jbyteArray,
@@ -495,7 +508,7 @@ macro_rules! jni_fn_deserialize {
 macro_rules! jni_fn_get_new_boxed_obj {
     ( $nm:ident($rt:ty) from $typ:ty, $body:expr ) => {
         #[no_mangle]
-        pub unsafe extern "system" fn $nm(
+        pub unsafe extern "C" fn $nm(
             env: JNIEnv,
             _class: JClass,
             handle: ObjectHandle,
@@ -512,7 +525,7 @@ macro_rules! jni_fn_get_new_boxed_obj {
 macro_rules! jni_fn_get_new_boxed_optional_obj {
     ( $nm:ident($rt:ty) from $typ:ty, $body:expr ) => {
         #[no_mangle]
-        pub unsafe extern "system" fn $nm(
+        pub unsafe extern "C" fn $nm(
             env: JNIEnv,
             _class: JClass,
             handle: ObjectHandle,
@@ -534,11 +547,7 @@ macro_rules! jni_fn_get_new_boxed_optional_obj {
 macro_rules! jni_fn_get_jint {
     ( $nm:ident($typ:ty) using $body:expr ) => {
         #[no_mangle]
-        pub unsafe extern "system" fn $nm(
-            env: JNIEnv,
-            _class: JClass,
-            handle: ObjectHandle,
-        ) -> jint {
+        pub unsafe extern "C" fn $nm(env: JNIEnv, _class: JClass, handle: ObjectHandle) -> jint {
             run_ffi_safe(&env, || {
                 let obj = native_handle_cast::<$typ>(handle)?;
                 jint_from_u32($body(obj))
@@ -551,7 +560,7 @@ macro_rules! jni_fn_get_jint {
 macro_rules! jni_fn_get_jboolean {
     ( $nm:ident($typ:ty) using $body:expr ) => {
         #[no_mangle]
-        pub unsafe extern "system" fn $nm(
+        pub unsafe extern "C" fn $nm(
             env: JNIEnv,
             _class: JClass,
             handle: ObjectHandle,
@@ -573,11 +582,7 @@ if the provided lambda just returns Ok(something)
 macro_rules! jni_fn_get_jstring {
     ( $nm:ident($typ:ty) using $body:expr ) => {
         #[no_mangle]
-        pub unsafe extern "system" fn $nm(
-            env: JNIEnv,
-            _class: JClass,
-            handle: ObjectHandle,
-        ) -> jstring {
+        pub unsafe extern "C" fn $nm(env: JNIEnv, _class: JClass, handle: ObjectHandle) -> jstring {
             fn inner_get(t: &$typ) -> Result<String, SignalProtocolError> {
                 $body(&t)
             }
@@ -593,7 +598,7 @@ macro_rules! jni_fn_get_jstring {
 macro_rules! jni_fn_get_jbytearray {
     ( $nm:ident($typ:ty) using $body:expr ) => {
         #[no_mangle]
-        pub unsafe extern "system" fn $nm(
+        pub unsafe extern "C" fn $nm(
             env: JNIEnv,
             _class: JClass,
             handle: ObjectHandle,
@@ -610,7 +615,7 @@ macro_rules! jni_fn_get_jbytearray {
 macro_rules! jni_fn_destroy {
     ( $nm:ident destroys $typ:ty ) => {
         #[no_mangle]
-        pub unsafe extern "system" fn $nm(_env: JNIEnv, _class: JClass, handle: ObjectHandle) {
+        pub unsafe extern "C" fn $nm(_env: JNIEnv, _class: JClass, handle: ObjectHandle) {
             if handle != 0 {
                 let _boxed_value = Box::from_raw(handle as *mut $typ);
             }

@@ -64,12 +64,12 @@ class PublicAPITests: XCTestCase {
 
         let pk = try! sk.publicKey()
         let pk_bytes = try! pk.serialize()
-        XCTAssertEqual(pk_bytes[0], 0x05); // DJB
-        XCTAssertEqual(pk_bytes.count, 33);
+        XCTAssertEqual(pk_bytes[0], 0x05) // DJB
+        XCTAssertEqual(pk_bytes.count, 33)
 
-        let pk_raw = try! pk.keyBytes();
-        XCTAssertEqual(pk_raw.count, 32);
-        XCTAssertEqual(pk_raw[0...31], pk_bytes[1...32]);
+        let pk_raw = try! pk.keyBytes()
+        XCTAssertEqual(pk_raw.count, 32)
+        XCTAssertEqual(pk_raw[0...31], pk_bytes[1...32])
 
         let sk_reloaded = try! PrivateKey(sk_bytes)
         let pk_reloaded = try! sk_reloaded.publicKey()
@@ -267,6 +267,9 @@ class PublicAPITests: XCTestCase {
                                  sessionStore: alice_store,
                                  identityStore: alice_store,
                                  context: nil)
+
+        XCTAssertEqual(try! alice_store.loadSession(for: bob_address, context: nil)?.remoteRegistrationId(),
+                       try! bob_store.localRegistrationId(context: nil))
 
         // Bob does the same:
         try! bob_store.storePreKey(PreKeyRecord(id: prekey_id, privateKey: bob_pre_key),
