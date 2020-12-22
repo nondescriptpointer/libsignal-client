@@ -19,6 +19,7 @@ jobs:
       java: ${{ steps.filter.outputs.java }}
       node: ${{ steps.filter.outputs.node }}
       swift: ${{ steps.filter.outputs.swift }}
+      rust_ios: ${{ steps.filter.outputs.rust_ios }}
 
     steps:
     - uses: actions/checkout@v2
@@ -32,6 +33,7 @@ jobs:
           - 'bin/**'
           - 'rust/*'
           - 'rust/!(bridge)/**'
+          - 'rust/bridge/shared/**'
           - 'rust-toolchain'
           - 'Cargo.toml'
           - 'Cargo.lock'
@@ -40,7 +42,7 @@ jobs:
           - '.clippy.toml'
           - '.rustfmt.license-template'
           - '.rustfmt.toml'
-          - 'rust/**' # deliberately re-include the rust/bridge/ directory
+          - 'rust/**' # deliberately re-include the rust/bridge/ directories
           java:
           - *all
           - '.dockerignore'
@@ -56,9 +58,11 @@ jobs:
           - 'package.json'
           - 'rust/bridge/node/**'
           - 'yarn.lock'
-          swift:
+          rust_ios: &rust_ios
           - *all
           - 'rust/bridge/ffi/**'
+          swift:
+          - *rust_ios
           - 'swift/**'
           - 'SignalClient.podspec'
           ignored:
@@ -104,7 +108,28 @@ jobs:
       run: cargo test --all --verbose
 
     - name: Clippy
-      run: cargo clippy --all
+      run: cargo clippy --all -- -D warnings
+
+  rust_ios:
+    name: Build Rust for iOS
+
+    runs-on: macos-latest
+
+    needs: changes
+
+    if: ${{ needs.changes.outputs.rust_ios == 'true' }}
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        target: aarch64-apple-ios
+
+    - name: Build
+      run: cargo build --verbose --target aarch64-apple-ios -p libsignal-ffi
 
   java:
     name: Java
@@ -160,8 +185,6 @@ jobs:
     - run: yarn lint
 
     - run: yarn format -c
-
-    - run: yarn build
 
     - name: Run yarn test
       uses: GabrielBB/xvfb-action@v1.4
@@ -223,6 +246,12 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: Check out SignalCoreKit
+        uses: actions/checkout@v2
+        with:
+          repository: signalapp/SignalCoreKit
+          path: SignalCoreKit
+
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -231,5 +260,7 @@ jobs:
 
       - name: Run pod lint
         # No import validation because it tries to build unsupported platforms (like 32-bit iOS).
-        run: pod lib lint --verbose --platforms=ios --skip-import-validation
+        run: pod lib lint --verbose --platforms=ios --include-podspecs=SignalCoreKit/SignalCoreKit.podspec --skip-import-validation
+        env:
+          XCODE_XCCONFIG_FILE: swift/PodLibLint.xcconfig
 

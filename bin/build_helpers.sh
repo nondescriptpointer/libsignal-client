@@ -14,9 +14,15 @@ check_rust() {
   fi
 
   if ! which rustup > /dev/null; then
-    echo 'error: rustup not found in PATH' >&2
-    echo 'note: Rust can be installed from https://rustup.rs/' >&2
-    exit 1
+    if ! which cargo > /dev/null; then
+      echo 'error: cargo not found in PATH; do you have Rust installed?' >&2
+      echo 'note: we recommend installing Rust via rustup from https://rustup.rs/' >&2
+      exit 1
+    fi
+
+    echo 'warning: rustup not found in PATH; using cargo at' "$(which cargo)" >&2
+    echo 'note: this project uses Rust toolchain' "'$(cat ./rust-toolchain)'" >&2
+    return
   fi
 
   if [[ -n "${CARGO_BUILD_TARGET:-}" ]] && ! (rustup target list --installed | grep -q "${CARGO_BUILD_TARGET:-}"); then
@@ -25,6 +31,20 @@ check_rust() {
     printf "\n\t%s\n\n" "rustup +${RUSTUP_TOOLCHAIN:-$(cat ./rust-toolchain)} target add ${CARGO_BUILD_TARGET}" >&2
     exit 1
   fi
+}
+
+# usage: copy_built_library target/release signal_node out_dir/libsignal_node.node
+#        copy_built_library target/release signal_jni out_dir/
+copy_built_library() {
+  for possible_library_name in "lib$2.dylib" "lib$2.so" "$2.dll"; do
+    possible_library_path="$1/${possible_library_name}"
+    if [ -e "${possible_library_path}" ]; then
+      out_dir=$(dirname "$3"x) # trailing x to distinguish directories from files
+      echo_then_run mkdir -p "${out_dir}"
+      echo_then_run cp "${possible_library_path}" "$3"
+      break
+    fi
+  done
 }
 
 echo_then_run() {

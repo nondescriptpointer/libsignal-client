@@ -1,8 +1,5 @@
 package org.signal.libsignal.metadata;
 
-import com.google.protobuf.ByteString;
-import com.google.protobuf.InvalidProtocolBufferException;
-
 import junit.framework.TestCase;
 
 import org.signal.libsignal.metadata.SealedSessionCipher.DecryptionResult;
@@ -22,6 +19,8 @@ import org.whispersystems.libsignal.state.PreKeyBundle;
 import org.whispersystems.libsignal.state.PreKeyRecord;
 import org.whispersystems.libsignal.state.SignedPreKeyRecord;
 
+import org.signal.client.internal.Native;
+
 import org.whispersystems.libsignal.util.Pair;
 
 import java.util.UUID;
@@ -37,7 +36,7 @@ public class SealedSessionCipherTest extends TestCase {
     return new SignedPreKeyRecord(signedPreKeyId, System.currentTimeMillis(), keyPair, signature);
   }
 
-  public void testEncryptDecrypt() throws UntrustedIdentityException, InvalidKeyException, InvalidCertificateException, InvalidProtocolBufferException, InvalidMetadataMessageException, ProtocolDuplicateMessageException, ProtocolUntrustedIdentityException, ProtocolLegacyMessageException, ProtocolInvalidKeyException, InvalidMetadataVersionException, ProtocolInvalidVersionException, ProtocolInvalidMessageException, ProtocolInvalidKeyIdException, ProtocolNoSessionException, SelfSendException {
+  public void testEncryptDecrypt() throws UntrustedIdentityException, InvalidKeyException, InvalidCertificateException, InvalidMetadataMessageException, ProtocolDuplicateMessageException, ProtocolUntrustedIdentityException, ProtocolLegacyMessageException, ProtocolInvalidKeyException, InvalidMetadataVersionException, ProtocolInvalidVersionException, ProtocolInvalidMessageException, ProtocolInvalidKeyIdException, ProtocolNoSessionException, SelfSendException {
     TestInMemorySignalProtocolStore aliceStore = new TestInMemorySignalProtocolStore();
     TestInMemorySignalProtocolStore bobStore   = new TestInMemorySignalProtocolStore();
 
@@ -73,7 +72,7 @@ public class SealedSessionCipherTest extends TestCase {
     SealedSessionCipher aliceCipher       = new SealedSessionCipher(aliceStore, UUID.fromString("9d0652a3-dcc3-4d11-975f-74d61598733f"), "+14151111111", 1);
 
     byte[] ciphertext = aliceCipher.encrypt(new SignalProtocolAddress("+14152222222", 1),
-                                            senderCertificate, "и вот я".getBytes());
+                                            senderCertificate, "\u0438 \u0432\u043E\u0442 \u044F".getBytes());
 
     SealedSessionCipher bobCipher = new SealedSessionCipher(bobStore, UUID.fromString("e80f7bbe-5b94-471e-bd8c-2173654ea3d1"), "+14152222222", 1);
 
@@ -96,7 +95,7 @@ public class SealedSessionCipherTest extends TestCase {
     SealedSessionCipher aliceCipher       = new SealedSessionCipher(aliceStore, UUID.fromString("9d0652a3-dcc3-4d11-975f-74d61598733f"), "+14151111111", 1);
 
     byte[] ciphertext = aliceCipher.encrypt(new SignalProtocolAddress("+14152222222", 1),
-                                            senderCertificate, "и вот я".getBytes());
+                                            senderCertificate, "\u0438 \u0432\u043E\u0442 \u044F".getBytes());
 
     SealedSessionCipher bobCipher = new SealedSessionCipher(bobStore, UUID.fromString("e80f7bbe-5b94-471e-bd8c-2173654ea3d1"), "+14152222222", 1);
 
@@ -135,40 +134,13 @@ public class SealedSessionCipherTest extends TestCase {
 
 
   private SenderCertificate createCertificateFor(ECKeyPair trustRoot, UUID uuid, String e164, int deviceId, ECPublicKey identityKey, long expires)
-      throws InvalidKeyException, InvalidCertificateException, InvalidProtocolBufferException {
+      throws InvalidKeyException, InvalidCertificateException {
     ECKeyPair serverKey = Curve.generateKeyPair();
 
-    byte[] serverCertificateBytes = SignalProtos.ServerCertificate.Certificate.newBuilder()
-                                                                              .setId(1)
-                                                                              .setKey(ByteString.copyFrom(serverKey.getPublicKey().serialize()))
-                                                                              .build()
-                                                                              .toByteArray();
+    ServerCertificate serverCertificate = new ServerCertificate(Native.ServerCertificate_New(1, serverKey.getPublicKey().nativeHandle(), trustRoot.getPrivateKey().nativeHandle()));
 
-    byte[] serverCertificateSignature = Curve.calculateSignature(trustRoot.getPrivateKey(), serverCertificateBytes);
-
-    ServerCertificate serverCertificate = new ServerCertificate(SignalProtos.ServerCertificate.newBuilder()
-                                                                                              .setCertificate(ByteString.copyFrom(serverCertificateBytes))
-                                                                                              .setSignature(ByteString.copyFrom(serverCertificateSignature))
-                                                                                              .build()
-                                                                                              .toByteArray());
-
-    byte[] senderCertificateBytes = SignalProtos.SenderCertificate.Certificate.newBuilder()
-                                                                              .setSenderUuid(uuid.toString())
-                                                                              .setSenderE164(e164)
-                                                                              .setSenderDevice(deviceId)
-                                                                              .setIdentityKey(ByteString.copyFrom(identityKey.serialize()))
-                                                                              .setExpires(expires)
-                                                                              .setSigner(SignalProtos.ServerCertificate.parseFrom(serverCertificate.getSerialized()))
-                                                                              .build()
-                                                                              .toByteArray();
-
-    byte[] senderCertificateSignature = Curve.calculateSignature(serverKey.getPrivateKey(), senderCertificateBytes);
-
-    return new SenderCertificate(SignalProtos.SenderCertificate.newBuilder()
-                                                               .setCertificate(ByteString.copyFrom(senderCertificateBytes))
-                                                               .setSignature(ByteString.copyFrom(senderCertificateSignature))
-                                                               .build()
-                                                               .toByteArray());
+    return new SenderCertificate(Native.SenderCertificate_New(uuid.toString(), e164, deviceId, identityKey.nativeHandle(), expires,
+                                                              serverCertificate.nativeHandle(), serverKey.getPrivateKey().nativeHandle()));
   }
 
   private void initializeSessions(TestInMemorySignalProtocolStore aliceStore, TestInMemorySignalProtocolStore bobStore)

@@ -50,7 +50,7 @@ case ${CONFIGURATION_NAME} in
     ;;
   Release )
     CARGO_PROFILE_ARG=--release
-    CARGO_PROFILE_DIR=Release
+    CARGO_PROFILE_DIR=release
     ;;
   * )
     echo 'error: unexpected CONFIGURATION_NAME:' ${CONFIGURATION_NAME} >&2
@@ -63,11 +63,4 @@ check_rust
 
 echo_then_run cargo build -p libsignal-node ${CARGO_PROFILE_ARG}
 
-for possible_library_name in libsignal_node.dylib libsignal_node.so signal_node.dll; do
-  possible_library_path="${CARGO_BUILD_TARGET_DIR:-target}/${CARGO_BUILD_TARGET:-}/${CARGO_PROFILE_DIR}/${possible_library_name}"
-  if [ -e "${possible_library_path}" ]; then
-    echo_then_run mkdir -p "${OUT_DIR}"
-    echo_then_run cp "${possible_library_path}" "${OUT_DIR}"/libsignal_client.node
-    break
-  fi
-done
+copy_built_library "${CARGO_BUILD_TARGET_DIR:-target}/${CARGO_BUILD_TARGET:-}/${CARGO_PROFILE_DIR}" signal_node "${OUT_DIR}"/libsignal_client.node

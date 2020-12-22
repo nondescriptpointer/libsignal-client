@@ -4,8 +4,8 @@
 //
 
 use crate::{
-    Context, IdentityKeyStore, PreKeyStore, ProtocolAddress, SessionRecord, SessionState,
-    SessionStore, SignalProtocolError, SignedPreKeyStore,
+    Context, IdentityKeyStore, PreKeyStore, ProtocolAddress, SessionRecord, SessionStore,
+    SignalProtocolError, SignedPreKeyStore,
 };
 
 use crate::consts::MAX_FORWARD_JUMPS;
@@ -15,6 +15,7 @@ use crate::error::Result;
 use crate::protocol::{CiphertextMessage, PreKeySignalMessage, SignalMessage};
 use crate::ratchet::{ChainKey, MessageKeys};
 use crate::session;
+use crate::state::SessionState;
 use crate::storage::Direction;
 
 use rand::{CryptoRng, Rng};
@@ -330,30 +331,6 @@ fn decrypt_message_with_state<R: Rng + CryptoRng>(
     state.clear_unacknowledged_pre_key_message()?;
 
     Ok(ptext)
-}
-
-pub async fn remote_registration_id(
-    remote_address: &ProtocolAddress,
-    session_store: &mut dyn SessionStore,
-    ctx: Context,
-) -> Result<u32> {
-    let session_record = session_store
-        .load_session(&remote_address, ctx)
-        .await?
-        .ok_or(SignalProtocolError::SessionNotFound)?;
-    session_record.session_state()?.remote_registration_id()
-}
-
-pub async fn session_version(
-    remote_address: &ProtocolAddress,
-    session_store: &mut dyn SessionStore,
-    ctx: Context,
-) -> Result<u32> {
-    let session_record = session_store
-        .load_session(&remote_address, ctx)
-        .await?
-        .ok_or(SignalProtocolError::SessionNotFound)?;
-    session_record.session_state()?.session_version()
 }
 
 fn get_or_create_chain_key<R: Rng + CryptoRng>(

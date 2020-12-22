@@ -6,12 +6,12 @@
 package org.whispersystems.libsignal.state;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.LinkedList;
-import java.util.List;
-
-import static org.whispersystems.libsignal.state.StorageProtos.RecordStructure;
-import static org.whispersystems.libsignal.state.StorageProtos.SessionStructure;
+import org.signal.client.internal.Native;
+import org.whispersystems.libsignal.IdentityKey;
+import org.whispersystems.libsignal.IdentityKeyPair;
+import org.whispersystems.libsignal.InvalidKeyException;
+import org.whispersystems.libsignal.ecc.ECKeyPair;
+import org.whispersystems.libsignal.ecc.ECPublicKey;
 
 /**
  * A SessionRecord encapsulates the state of an ongoing session.
@@ -20,95 +20,137 @@ import static org.whispersystems.libsignal.state.StorageProtos.SessionStructure;
  */
 public class SessionRecord {
 
-  private static final int ARCHIVED_STATES_MAX_LENGTH = 40;
+  long handle;
 
-  private SessionState             sessionState   = new SessionState();
-  private LinkedList<SessionState> previousStates = new LinkedList<>();
-  private boolean                  fresh          = false;
-
-  public SessionRecord() {
-    this.fresh = true;
+  @Override
+  protected void finalize() {
+    Native.SessionRecord_Destroy(this.handle);
   }
 
-  public SessionRecord(SessionState sessionState) {
-    this.sessionState = sessionState;
-    this.fresh        = false;
+  public SessionRecord() {
+    this.handle = Native.SessionRecord_NewFresh();
+  }
+
+  private SessionRecord(long handle) {
+    this.handle = handle;
+  }
+
+  public static SessionRecord fromSingleSessionState(byte[] sessionStateBytes) throws IOException {
+    return new SessionRecord(Native.SessionRecord_FromSingleSessionState(sessionStateBytes));
   }
 
   public SessionRecord(byte[] serialized) throws IOException {
-    RecordStructure record = RecordStructure.parseFrom(serialized);
-    this.sessionState = new SessionState(record.getCurrentSession());
-    this.fresh        = false;
-
-    for (SessionStructure previousStructure : record.getPreviousSessionsList()) {
-      previousStates.add(new SessionState(previousStructure));
-    }
-  }
-
-  public boolean hasSessionState(int version, byte[] aliceBaseKey) {
-    if (sessionState.getSessionVersion() == version &&
-        Arrays.equals(aliceBaseKey, sessionState.getAliceBaseKey()))
-    {
-      return true;
-    }
-
-    for (SessionState state : previousStates) {
-      if (state.getSessionVersion() == version &&
-          Arrays.equals(aliceBaseKey, state.getAliceBaseKey()))
-      {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  public SessionState getSessionState() {
-    return sessionState;
-  }
-
-  public boolean isFresh() {
-    return fresh;
+    this.handle = Native.SessionRecord_Deserialize(serialized);
   }
 
   /**
-   * Move the current {@link SessionState} into the list of "previous" session states,
-   * and replace the current {@link org.whispersystems.libsignal.state.SessionState}
-   * with a fresh reset instance.
+   * Move the current {@link SessionState} into the list of "previous" session states, and replace
+   * the current {@link org.whispersystems.libsignal.state.SessionState} with a fresh reset
+   * instance.
    */
   public void archiveCurrentState() {
-    promoteState(new SessionState());
+    Native.SessionRecord_ArchiveCurrentState(this.handle);
   }
 
-  public void promoteState(SessionState promotedState) {
-    this.previousStates.addFirst(sessionState);
-    this.sessionState = promotedState;
+  public int getSessionVersion() {
+    return Native.SessionRecord_GetSessionVersion(this.handle);
+  }
 
-    if (previousStates.size() > ARCHIVED_STATES_MAX_LENGTH) {
-      previousStates.removeLast();
+  public int getRemoteRegistrationId() {
+    return Native.SessionRecord_GetRemoteRegistrationId(this.handle);
+  }
+
+  public int getLocalRegistrationId() {
+    return Native.SessionRecord_GetLocalRegistrationId(this.handle);
+  }
+
+  public IdentityKey getRemoteIdentityKey() {
+    byte[] keyBytes = Native.SessionRecord_GetRemoteIdentityKeyPublic(this.handle);
+
+    if (keyBytes == null) {
+      return null;
+    }
+
+    try {
+      return new IdentityKey(keyBytes);
+    } catch (InvalidKeyException e) {
+      throw new AssertionError(e);
     }
   }
 
-  public void setState(SessionState sessionState) {
-    this.sessionState = sessionState;
+  public IdentityKey getLocalIdentityKey() {
+    byte[] keyBytes = Native.SessionRecord_GetLocalIdentityKeyPublic(this.handle);
+    try {
+      return new IdentityKey(keyBytes);
+    } catch (InvalidKeyException e) {
+      throw new AssertionError(e);
+    }
   }
 
-  /**
-   * @return a serialized version of the current SessionRecord.
-   */
+  public boolean hasSenderChain() {
+    return Native.SessionRecord_HasSenderChain(this.handle);
+  }
+
+  /** @return a serialized version of the current SessionRecord. */
   public byte[] serialize() {
-    List<SessionStructure> previousStructures = new LinkedList<>();
-
-    for (SessionState previousState : previousStates) {
-      previousStructures.add(previousState.getStructure());
-    }
-
-    RecordStructure record = RecordStructure.newBuilder()
-                                            .setCurrentSession(sessionState.getStructure())
-                                            .addAllPreviousSessions(previousStructures)
-                                            .build();
-
-    return record.toByteArray();
+    return Native.SessionRecord_Serialize(this.handle);
   }
 
+  // Following functions are for internal or testing use and may be removed in the future:
+
+  public SessionState getSessionState() {
+    return new SessionState(Native.SessionRecord_GetSessionState(this.handle));
+  }
+
+  public byte[] getReceiverChainKeyValue(ECPublicKey senderEphemeral) {
+    return Native.SessionRecord_GetReceiverChainKeyValue(
+        this.handle, senderEphemeral.nativeHandle());
+  }
+
+  public byte[] getSenderChainKeyValue() {
+    return Native.SessionRecord_GetSenderChainKeyValue(this.handle);
+  }
+
+  public byte[] getAliceBaseKey() {
+    return Native.SessionRecord_GetAliceBaseKey(this.handle);
+  }
+
+  public static SessionRecord initializeAliceSession(
+      IdentityKeyPair identityKey,
+      ECKeyPair baseKey,
+      IdentityKey theirIdentityKey,
+      ECPublicKey theirSignedPreKey,
+      ECPublicKey theirRatchetKey) {
+    return new SessionRecord(
+        Native.SessionRecord_InitializeAliceSession(
+            identityKey.getPrivateKey().nativeHandle(),
+            identityKey.getPublicKey().getPublicKey().nativeHandle(),
+            baseKey.getPrivateKey().nativeHandle(),
+            baseKey.getPublicKey().nativeHandle(),
+            theirIdentityKey.getPublicKey().nativeHandle(),
+            theirSignedPreKey.nativeHandle(),
+            theirRatchetKey.nativeHandle()));
+  }
+
+  public static SessionRecord initializeBobSession(
+      IdentityKeyPair identityKey,
+      ECKeyPair signedPreKey,
+      ECKeyPair ephemeralKey,
+      IdentityKey theirIdentityKey,
+      ECPublicKey theirBaseKey) {
+    return new SessionRecord(
+        Native.SessionRecord_InitializeBobSession(
+            identityKey.getPrivateKey().nativeHandle(),
+            identityKey.getPublicKey().getPublicKey().nativeHandle(),
+            signedPreKey.getPrivateKey().nativeHandle(),
+            signedPreKey.getPublicKey().nativeHandle(),
+            ephemeralKey.getPrivateKey().nativeHandle(),
+            ephemeralKey.getPublicKey().nativeHandle(),
+            theirIdentityKey.getPublicKey().nativeHandle(),
+            theirBaseKey.nativeHandle()));
+  }
+
+  long nativeHandle() {
+    return this.handle;
+  }
 }
