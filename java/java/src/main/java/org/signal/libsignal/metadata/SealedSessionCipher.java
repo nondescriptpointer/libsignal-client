@@ -3,7 +3,6 @@ package org.signal.libsignal.metadata;
 import org.signal.libsignal.metadata.certificate.CertificateValidator;
 import org.signal.libsignal.metadata.certificate.InvalidCertificateException;
 import org.signal.libsignal.metadata.certificate.SenderCertificate;
-import org.signal.libsignal.metadata.protocol.UnidentifiedSenderMessage;
 import org.signal.libsignal.metadata.protocol.UnidentifiedSenderMessageContent;
 import org.whispersystems.libsignal.DuplicateMessageException;
 import org.whispersystems.libsignal.IdentityKeyPair;
@@ -17,14 +16,17 @@ import org.whispersystems.libsignal.NoSessionException;
 import org.whispersystems.libsignal.SessionCipher;
 import org.whispersystems.libsignal.SignalProtocolAddress;
 import org.whispersystems.libsignal.UntrustedIdentityException;
+import org.whispersystems.libsignal.groups.GroupCipher;
 import org.whispersystems.libsignal.protocol.CiphertextMessage;
 import org.whispersystems.libsignal.protocol.PreKeySignalMessage;
+import org.whispersystems.libsignal.protocol.SenderKeyMessage;
 import org.whispersystems.libsignal.protocol.SignalMessage;
 import org.whispersystems.libsignal.state.SignalProtocolStore;
 import org.whispersystems.libsignal.util.guava.Optional;
 
 import org.signal.client.internal.Native;
 
+import java.util.List;
 import java.util.UUID;
 
 public class SealedSessionCipher {
@@ -42,7 +44,7 @@ public class SealedSessionCipher {
                              int localDeviceId)
   {
     this.signalProtocolStore = signalProtocolStore;
-    this.localUuidAddress    = localUuid != null ? localUuid.toString() : null;
+    this.localUuidAddress    = localUuid.toString();
     this.localE164Address    = localE164Address;
     this.localDeviceId       = localDeviceId;
   }
@@ -50,12 +52,49 @@ public class SealedSessionCipher {
   public byte[] encrypt(SignalProtocolAddress destinationAddress, SenderCertificate senderCertificate, byte[] paddedPlaintext)
       throws InvalidKeyException, UntrustedIdentityException
   {
+    CiphertextMessage message = Native.SessionCipher_EncryptMessage(
+      paddedPlaintext,
+      destinationAddress.nativeHandle(),
+      this.signalProtocolStore,
+      this.signalProtocolStore,
+      null);
+    UnidentifiedSenderMessageContent content = new UnidentifiedSenderMessageContent(
+      message,
+      senderCertificate,
+      UnidentifiedSenderMessageContent.CONTENT_HINT_DEFAULT,
+      Optional.<byte[]>absent());
+    return encrypt(destinationAddress, content);
+  }
+
+  public byte[] encrypt(SignalProtocolAddress destinationAddress, UnidentifiedSenderMessageContent content)
+      throws InvalidKeyException, UntrustedIdentityException
+  {
     return Native.SealedSessionCipher_Encrypt(
-       destinationAddress.nativeHandle(),
-       senderCertificate.nativeHandle(),
-       paddedPlaintext,
-       this.signalProtocolStore,
-       this.signalProtocolStore);
+      destinationAddress.nativeHandle(),
+      content.nativeHandle(),
+      this.signalProtocolStore,
+      null);
+  }
+
+  public byte[] multiRecipientEncrypt(List<SignalProtocolAddress> recipients, UnidentifiedSenderMessageContent content)
+      throws InvalidKeyException, UntrustedIdentityException
+  {
+    long[] recipientHandles = new long[recipients.size()];
+    int i = 0;
+    for (SignalProtocolAddress nextRecipient : recipients) {
+      recipientHandles[i] = nextRecipient.nativeHandle();
+      i++;
+    }
+    return Native.SealedSessionCipher_MultiRecipientEncrypt(
+      recipientHandles,
+      content.nativeHandle(),
+      this.signalProtocolStore,
+      null);
+  }
+
+  // For testing only.
+  static byte[] multiRecipientMessageForSingleRecipient(byte[] message) {
+    return Native.SealedSessionCipher_MultiRecipientMessageForSingleRecipient(message);
   }
 
   public DecryptionResult decrypt(CertificateValidator validator, byte[] ciphertext, long timestamp)
@@ -70,14 +109,14 @@ public class SealedSessionCipher {
     UnidentifiedSenderMessageContent content;
     try {
       content = new UnidentifiedSenderMessageContent(
-        Native.SealedSessionCipher_DecryptToUsmc(ciphertext, this.signalProtocolStore));
+        Native.SealedSessionCipher_DecryptToUsmc(ciphertext, this.signalProtocolStore, null));
       validator.validate(content.getSenderCertificate(), timestamp);
     } catch (Exception e) {
       throw new InvalidMetadataMessageException(e);
     }
 
     boolean isLocalE164 = localE164Address != null && localE164Address.equals(content.getSenderCertificate().getSenderE164().orNull());
-    boolean isLocalUuid = localUuidAddress != null && localUuidAddress.equals(content.getSenderCertificate().getSenderUuid().orNull());
+    boolean isLocalUuid = localUuidAddress.equals(content.getSenderCertificate().getSenderUuid());
 
     if ((isLocalE164 || isLocalUuid) && content.getSenderCertificate().getSenderDeviceId() == localDeviceId) {
       throw new SelfSendException();
@@ -89,21 +128,21 @@ public class SealedSessionCipher {
                                   content.getSenderCertificate().getSenderDeviceId(),
                                   decrypt(content));
     } catch (InvalidMessageException e) {
-      throw new ProtocolInvalidMessageException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId());
+      throw new ProtocolInvalidMessageException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId(), content.getContentHint(), content.getGroupId());
     } catch (InvalidKeyException e) {
-      throw new ProtocolInvalidKeyException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId());
+      throw new ProtocolInvalidKeyException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId(), content.getContentHint(), content.getGroupId());
     } catch (NoSessionException e) {
-      throw new ProtocolNoSessionException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId());
+      throw new ProtocolNoSessionException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId(), content.getContentHint(), content.getGroupId());
     } catch (LegacyMessageException e) {
-      throw new ProtocolLegacyMessageException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId());
+      throw new ProtocolLegacyMessageException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId(), content.getContentHint(), content.getGroupId());
     } catch (InvalidVersionException e) {
-      throw new ProtocolInvalidVersionException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId());
+      throw new ProtocolInvalidVersionException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId(), content.getContentHint(), content.getGroupId());
     } catch (DuplicateMessageException e) {
-      throw new ProtocolDuplicateMessageException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId());
+      throw new ProtocolDuplicateMessageException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId(), content.getContentHint(), content.getGroupId());
     } catch (InvalidKeyIdException e) {
-      throw new ProtocolInvalidKeyIdException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId());
+      throw new ProtocolInvalidKeyIdException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId(), content.getContentHint(), content.getGroupId());
     } catch (UntrustedIdentityException e) {
-      throw new ProtocolUntrustedIdentityException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId());
+      throw new ProtocolUntrustedIdentityException(e, content.getSenderCertificate().getSender(), content.getSenderCertificate().getSenderDeviceId(), content.getContentHint(), content.getGroupId());
     }
   }
 
@@ -118,29 +157,30 @@ public class SealedSessionCipher {
   private byte[] decrypt(UnidentifiedSenderMessageContent message)
       throws InvalidVersionException, InvalidMessageException, InvalidKeyException, DuplicateMessageException, InvalidKeyIdException, UntrustedIdentityException, LegacyMessageException, NoSessionException
   {
-    SignalProtocolAddress sender = new SignalProtocolAddress(Native.SenderCertificate_PreferredAddress(message.getSenderCertificate().nativeHandle(), signalProtocolStore));
+    SignalProtocolAddress sender = new SignalProtocolAddress(message.getSenderCertificate().getSenderUuid(), message.getSenderCertificate().getSenderDeviceId());
 
     switch (message.getType()) {
       case CiphertextMessage.WHISPER_TYPE: return new SessionCipher(signalProtocolStore, sender).decrypt(new SignalMessage(message.getContent()));
       case CiphertextMessage.PREKEY_TYPE:  return new SessionCipher(signalProtocolStore, sender).decrypt(new PreKeySignalMessage(message.getContent()));
+      case CiphertextMessage.SENDERKEY_TYPE:  return new GroupCipher(signalProtocolStore, sender).decrypt(message.getContent());
       default:                             throw new InvalidMessageException("Unknown type: " + message.getType());
     }
   }
 
   public static class DecryptionResult {
-    private final Optional<String> senderUuid;
+    private final String           senderUuid;
     private final Optional<String> senderE164;
     private final int              deviceId;
     private final byte[]           paddedMessage;
 
-    private DecryptionResult(Optional<String> senderUuid, Optional<String> senderE164, int deviceId, byte[] paddedMessage) {
+    private DecryptionResult(String senderUuid, Optional<String> senderE164, int deviceId, byte[] paddedMessage) {
       this.senderUuid    = senderUuid;
       this.senderE164    = senderE164;
       this.deviceId      = deviceId;
       this.paddedMessage = paddedMessage;
     }
 
-    public Optional<String> getSenderUuid() {
+    public String getSenderUuid() {
       return senderUuid;
     }
 

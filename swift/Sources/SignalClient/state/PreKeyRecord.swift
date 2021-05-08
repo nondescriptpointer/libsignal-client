@@ -43,7 +43,7 @@ public class PreKeyRecord: ClonableHandleOwner {
     public func serialize() -> [UInt8] {
         return failOnError {
             try invokeFnReturningArray {
-                signal_pre_key_record_serialize(nativeHandle, $0, $1)
+                signal_pre_key_record_serialize($0, $1, nativeHandle)
             }
         }
     }
@@ -51,7 +51,7 @@ public class PreKeyRecord: ClonableHandleOwner {
     public var id: UInt32 {
         return failOnError {
             try invokeFnReturningInteger {
-                signal_pre_key_record_get_id(nativeHandle, $0)
+                signal_pre_key_record_get_id($0, nativeHandle)
             }
         }
     }

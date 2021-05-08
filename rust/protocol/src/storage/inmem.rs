@@ -3,14 +3,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 
-use crate::error::{Result, SignalProtocolError};
-use crate::state::{PreKeyId, PreKeyRecord, SessionRecord, SignedPreKeyId, SignedPreKeyRecord};
+use crate::{
+    IdentityKey, IdentityKeyPair, PreKeyRecord, ProtocolAddress, Result, SenderKeyRecord,
+    SessionRecord, SignalProtocolError, SignedPreKeyRecord,
+};
+
+use crate::state::{PreKeyId, SignedPreKeyId};
 use crate::storage::traits;
 use crate::storage::Context;
-use crate::{IdentityKey, IdentityKeyPair, ProtocolAddress, SenderKeyName, SenderKeyRecord};
 
 use async_trait::async_trait;
+use std::borrow::Cow;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct InMemIdentityKeyStore {
@@ -224,7 +229,9 @@ impl traits::SessionStore for InMemSessionStore {
 
 #[derive(Clone)]
 pub struct InMemSenderKeyStore {
-    keys: HashMap<SenderKeyName, SenderKeyRecord>,
+    // We use Cow keys in order to store owned values but compare to referenced ones.
+    // See https://users.rust-lang.org/t/hashmap-with-tuple-keys/12711/6.
+    keys: HashMap<(Cow<'static, ProtocolAddress>, Uuid), SenderKeyRecord>,
 }
 
 impl InMemSenderKeyStore {
@@ -245,20 +252,28 @@ impl Default for InMemSenderKeyStore {
 impl traits::SenderKeyStore for InMemSenderKeyStore {
     async fn store_sender_key(
         &mut self,
-        sender_key_name: &SenderKeyName,
+        sender: &ProtocolAddress,
+        distribution_id: Uuid,
         record: &SenderKeyRecord,
         _ctx: Context,
     ) -> Result<()> {
-        self.keys.insert(sender_key_name.clone(), record.clone());
+        self.keys.insert(
+            (Cow::Owned(sender.clone()), distribution_id),
+            record.clone(),
+        );
         Ok(())
     }
 
     async fn load_sender_key(
         &mut self,
-        sender_key_name: &SenderKeyName,
+        sender: &ProtocolAddress,
+        distribution_id: Uuid,
         _ctx: Context,
     ) -> Result<Option<SenderKeyRecord>> {
-        Ok(self.keys.get(&sender_key_name).cloned())
+        Ok(self
+            .keys
+            .get(&(Cow::Borrowed(sender), distribution_id))
+            .cloned())
     }
 }
 
@@ -391,22 +406,24 @@ impl traits::SessionStore for InMemSignalProtocolStore {
 impl traits::SenderKeyStore for InMemSignalProtocolStore {
     async fn store_sender_key(
         &mut self,
-        sender_key_name: &SenderKeyName,
+        sender: &ProtocolAddress,
+        distribution_id: Uuid,
         record: &SenderKeyRecord,
         ctx: Context,
     ) -> Result<()> {
         self.sender_key_store
-            .store_sender_key(sender_key_name, record, ctx)
+            .store_sender_key(sender, distribution_id, record, ctx)
             .await
     }
 
     async fn load_sender_key(
         &mut self,
-        sender_key_name: &SenderKeyName,
+        sender: &ProtocolAddress,
+        distribution_id: Uuid,
         ctx: Context,
     ) -> Result<Option<SenderKeyRecord>> {
         self.sender_key_store
-            .load_sender_key(sender_key_name, ctx)
+            .load_sender_key(sender, distribution_id, ctx)
             .await
     }
 }

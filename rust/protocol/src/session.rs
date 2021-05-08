@@ -4,17 +4,13 @@
 //
 
 use crate::{
-    Context, IdentityKeyStore, PreKeyStore, ProtocolAddress, SessionRecord, SessionStore,
-    SignalProtocolError, SignedPreKeyStore,
+    Context, Direction, IdentityKeyStore, KeyPair, PreKeyBundle, PreKeySignalMessage, PreKeyStore,
+    ProtocolAddress, Result, SessionRecord, SessionStore, SignalProtocolError, SignedPreKeyStore,
 };
 
-use crate::curve;
-use crate::error::Result;
-use crate::protocol::PreKeySignalMessage;
 use crate::ratchet;
 use crate::ratchet::{AliceSignalProtocolParameters, BobSignalProtocolParameters};
-use crate::state::{PreKeyBundle, PreKeyId};
-use crate::storage::Direction;
+use crate::state::PreKeyId;
 use rand::{CryptoRng, Rng};
 
 /*
@@ -97,6 +93,7 @@ async fn process_prekey_v3(
                 .key_pair()?,
         )
     } else {
+        log::warn!("Processing PreKey message which had no one-time prekey");
         None
     };
 
@@ -141,8 +138,7 @@ pub async fn process_prekey_bundle<R: Rng + CryptoRng>(
         ));
     }
 
-    if !curve::verify_signature(
-        their_identity_key.public_key(),
+    if !their_identity_key.public_key().verify_signature(
         &bundle.signed_pre_key_public()?.serialize(),
         bundle.signed_pre_key_signature()?,
     )? {
@@ -154,7 +150,7 @@ pub async fn process_prekey_bundle<R: Rng + CryptoRng>(
         .await?
         .unwrap_or_else(SessionRecord::new_fresh);
 
-    let our_base_key_pair = curve::KeyPair::generate(&mut csprng);
+    let our_base_key_pair = KeyPair::generate(&mut csprng);
     let their_signed_prekey = bundle.signed_pre_key_public()?;
 
     let their_one_time_prekey = bundle.pre_key_public()?;
@@ -172,6 +168,12 @@ pub async fn process_prekey_bundle<R: Rng + CryptoRng>(
     );
 
     let mut session = ratchet::initialize_alice_session(&parameters, csprng)?;
+
+    log::info!(
+        "set_unacknowledged_pre_key_message for: {} with preKeyId: {}",
+        remote_address,
+        their_one_time_prekey_id.map_or_else(|| "<none>".to_string(), |id| id.to_string())
+    );
 
     session.set_unacknowledged_pre_key_message(
         their_one_time_prekey_id,

@@ -1,11 +1,11 @@
 #
-# Copyright (C) 2020 Signal Messenger, LLC.
+# Copyright (C) 2020-2021 Signal Messenger, LLC.
 # SPDX-License-Identifier: AGPL-3.0-only
 #
 
 [package]
 name = "libsignal-ffi"
-version = "0.1.0"
+version = "0.5.1"
 authors = ["Jack Lloyd <jack@signal.org>"]
 edition = "2018"
 license = "AGPL-3.0-only"
@@ -15,16 +15,12 @@ name = "signal_ffi"
 crate-type = ["staticlib"]
 
 [dependencies]
-libsignal-protocol-rust = { path = "../../protocol" }
-aes-gcm-siv = { path = "../../aes-gcm-siv" }
+libsignal-protocol = { path = "../../protocol" }
+device-transfer = { path = "../../device-transfer" }
+signal-crypto = { path = "../../crypto" }
 libsignal-bridge = { path = "../shared", features = ["ffi"] }
 async-trait = "0.1.41"
 libc = "0.2"
-futures = "0.3.7"
 rand = "0.7.3"
-static_assertions = "1.1"
-log = "0.4.11"
-
-[build-dependencies]
-cbindgen = "0.15"
-walkdir = "2.3"
+log = "0.4"
+log-panics = { version = "2.0.0", features = ["with-backtrace"] }

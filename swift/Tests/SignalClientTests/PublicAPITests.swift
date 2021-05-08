@@ -232,24 +232,24 @@ class PublicAPITests: TestCaseBase {
     func testGroupCipher() {
 
         let sender = try! ProtocolAddress(name: "+14159999111", deviceId: 4)
-        let group_id = try! SenderKeyName(groupName: "summer camp", sender: sender)
+        let distribution_id = UUID(uuidString: "d1d1d1d1-7000-11eb-b32a-33b8a8a487a6")!
 
         let a_store = InMemorySignalProtocolStore()
 
-        let skdm = try! SenderKeyDistributionMessage(name: group_id, store: a_store, context: NullContext())
+        let skdm = try! SenderKeyDistributionMessage(from: sender, distributionId: distribution_id, store: a_store, context: NullContext())
 
         let skdm_bits = skdm.serialize()
 
         let skdm_r = try! SenderKeyDistributionMessage(bytes: skdm_bits)
 
-        let a_ctext = try! groupEncrypt(groupId: group_id, message: [1, 2, 3], store: a_store, context: NullContext())
+        let a_ctext = try! groupEncrypt([1, 2, 3], from: sender, distributionId: distribution_id, store: a_store, context: NullContext()).serialize()
 
         let b_store = InMemorySignalProtocolStore()
-        try! processSenderKeyDistributionMessage(sender: group_id,
-                                                 message: skdm_r,
+        try! processSenderKeyDistributionMessage(skdm_r,
+                                                 from: sender,
                                                  store: b_store,
                                                  context: NullContext())
-        let b_ptext = try! groupDecrypt(groupId: group_id, message: a_ctext, store: b_store, context: NullContext())
+        let b_ptext = try! groupDecrypt(a_ctext, from: sender, store: b_store, context: NullContext())
 
         XCTAssertEqual(b_ptext, [1, 2, 3])
     }
@@ -280,7 +280,7 @@ class PublicAPITests: TestCaseBase {
 
         XCTAssertEqual(senderCert.publicKey.serialize().count, 33)
 
-        XCTAssertEqual(senderCert.senderUuid, Optional("9d0652a3-dcc3-4d11-975f-74d61598733f"))
+        XCTAssertEqual(senderCert.senderUuid, "9d0652a3-dcc3-4d11-975f-74d61598733f")
         XCTAssertEqual(senderCert.senderE164, Optional("+14152222222"))
 
         let serverCert = senderCert.serverCertificate
@@ -288,6 +288,47 @@ class PublicAPITests: TestCaseBase {
         XCTAssertEqual(serverCert.keyId, 1)
         XCTAssertEqual(serverCert.publicKey.serialize().count, 33)
         XCTAssertEqual(serverCert.signatureBytes.count, 64)
+    }
+
+    private func testRoundTrip<Handle>(_ initial: Handle, serialize: (Handle) -> [UInt8], deserialize: ([UInt8]) throws -> Handle, line: UInt = #line) {
+        let bytes = serialize(initial)
+        let roundTripBytes = serialize(try! deserialize(bytes))
+        XCTAssertEqual(bytes, roundTripBytes, "\(Handle.self) did not round trip correctly", line: line)
+    }
+
+    func testSerializationRoundTrip() {
+        let keyPair = IdentityKeyPair.generate()
+        testRoundTrip(keyPair, serialize: { $0.serialize() }, deserialize: { try .init(bytes: $0) })
+        testRoundTrip(keyPair.publicKey, serialize: { $0.serialize() }, deserialize: { try .init($0) })
+        testRoundTrip(keyPair.privateKey, serialize: { $0.serialize() }, deserialize: { try .init($0) })
+        testRoundTrip(keyPair.identityKey, serialize: { $0.serialize() }, deserialize: { try .init(bytes: $0) })
+
+        let preKeyRecord = try! PreKeyRecord(id: 7, publicKey: keyPair.publicKey, privateKey: keyPair.privateKey)
+        testRoundTrip(preKeyRecord, serialize: { $0.serialize() }, deserialize: { try .init(bytes: $0) })
+
+        let signedPreKeyRecord = try! SignedPreKeyRecord(
+            id: 77,
+            timestamp: 42000,
+            privateKey: keyPair.privateKey,
+            signature: keyPair.privateKey.generateSignature(message: keyPair.publicKey.serialize())
+        )
+        testRoundTrip(signedPreKeyRecord, serialize: { $0.serialize() }, deserialize: { try .init(bytes: $0) })
+    }
+
+    func testDeviceTransferKey() {
+        let deviceKey = DeviceTransferKey.generate()
+
+        /*
+         Anything encoded in an ASN.1 SEQUENCE starts with 0x30 when encoded
+         as DER. (This test could be better.)
+         */
+        let key = deviceKey.privateKeyMaterial()
+        XCTAssert(key.count > 0)
+        XCTAssertEqual(key[0], 0x30)
+
+        let cert = deviceKey.generateCertificate("name", 30)
+        XCTAssert(cert.count > 0)
+        XCTAssertEqual(cert[0], 0x30)
     }
 
     static var allTests: [(String, (PublicAPITests) -> () throws -> Void)] {
@@ -300,6 +341,7 @@ class PublicAPITests: TestCaseBase {
             ("testAesGcmSiv", testAesGcmSiv),
             ("testGroupCipher", testGroupCipher),
             ("testSenderCertifications", testSenderCertificates),
+            ("testSerializationRoundTrip", testSerializationRoundTrip),
         ]
     }
 }

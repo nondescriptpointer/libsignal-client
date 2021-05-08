@@ -1,48 +1,39 @@
 //
-// Copyright 2020 Signal Messenger, LLC.
+// Copyright 2020-2021 Signal Messenger, LLC.
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 
+use jni::objects::{GlobalRef, JObject, JString, JThrowable};
+use jni::{JNIEnv, JavaVM};
 use std::fmt;
 
-use aes_gcm_siv::Error as AesGcmSivError;
-use libsignal_protocol_rust::*;
+use device_transfer::Error as DeviceTransferError;
+use libsignal_protocol::*;
+use signal_crypto::Error as SignalCryptoError;
 
+use super::*;
+
+/// The top-level error type for when something goes wrong.
 #[derive(Debug)]
 pub enum SignalJniError {
     Signal(SignalProtocolError),
-    AesGcmSiv(AesGcmSivError),
+    DeviceTransfer(DeviceTransferError),
+    SignalCrypto(SignalCryptoError),
     Jni(jni::errors::Error),
     BadJniParameter(&'static str),
     UnexpectedJniResultType(&'static str, &'static str),
     NullHandle,
     IntegerOverflow(String),
     UnexpectedPanic(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
-    ExceptionDuringCallback(String),
-}
-
-impl SignalJniError {
-    pub fn to_signal_protocol_error(&self) -> SignalProtocolError {
-        match self {
-            SignalJniError::Signal(e) => e.clone(),
-            SignalJniError::Jni(e) => SignalProtocolError::FfiBindingError(e.to_string()),
-            SignalJniError::BadJniParameter(m) => {
-                SignalProtocolError::InvalidArgument(m.to_string())
-            }
-            _ => SignalProtocolError::FfiBindingError(format!("{}", self)),
-        }
-    }
 }
 
 impl fmt::Display for SignalJniError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             SignalJniError::Signal(s) => write!(f, "{}", s),
-            SignalJniError::AesGcmSiv(s) => write!(f, "{}", s),
+            SignalJniError::DeviceTransfer(s) => write!(f, "{}", s),
+            SignalJniError::SignalCrypto(s) => write!(f, "{}", s),
             SignalJniError::Jni(s) => write!(f, "JNI error {}", s),
-            SignalJniError::ExceptionDuringCallback(s) => {
-                write!(f, "exception recieved during callback {}", s)
-            }
             SignalJniError::NullHandle => write!(f, "null handle"),
             SignalJniError::BadJniParameter(m) => write!(f, "bad parameter type {}", m),
             SignalJniError::UnexpectedJniResultType(m, t) => {
@@ -65,9 +56,15 @@ impl From<SignalProtocolError> for SignalJniError {
     }
 }
 
-impl From<AesGcmSivError> for SignalJniError {
-    fn from(e: AesGcmSivError) -> SignalJniError {
-        SignalJniError::AesGcmSiv(e)
+impl From<DeviceTransferError> for SignalJniError {
+    fn from(e: DeviceTransferError) -> SignalJniError {
+        SignalJniError::DeviceTransfer(e)
+    }
+}
+
+impl From<SignalCryptoError> for SignalJniError {
+    fn from(e: SignalCryptoError) -> SignalJniError {
+        SignalJniError::SignalCrypto(e)
     }
 }
 
@@ -89,3 +86,92 @@ impl From<SignalJniError> for SignalProtocolError {
         }
     }
 }
+
+pub type SignalJniResult<T> = Result<T, SignalJniError>;
+
+/// A lifetime-less reference to a thrown Java exception that can be used as an [`Error`].
+///
+/// `ThrownException` allows a Java exception to be safely persisted past the lifetime of a
+/// particular call.
+///
+/// Ideally, `ThrownException` should be Dropped on the thread the JVM is running on; see
+/// [`jni::objects::GlobalRef`] for more details.
+pub struct ThrownException {
+    // GlobalRef already carries a JavaVM reference, but it's not accessible to us.
+    jvm: JavaVM,
+    exception_ref: GlobalRef,
+}
+
+impl ThrownException {
+    /// Gets the wrapped exception as a live object with a lifetime.
+    pub fn as_obj(&self) -> JThrowable<'_> {
+        self.exception_ref.as_obj().into()
+    }
+
+    /// Persists the given throwable.
+    pub fn new<'a>(env: &JNIEnv<'a>, throwable: JThrowable<'a>) -> Result<Self, SignalJniError> {
+        assert!(**throwable != *JObject::null());
+        Ok(Self {
+            jvm: env.get_java_vm()?,
+            exception_ref: env.new_global_ref(throwable)?,
+        })
+    }
+
+    pub fn class_name(&self, env: &JNIEnv) -> Result<String, SignalJniError> {
+        let class_type = env.get_object_class(self.exception_ref.as_obj())?;
+        let class_name: JObject = call_method_checked(
+            env,
+            class_type,
+            "getCanonicalName",
+            jni_signature!(() -> java.lang.String),
+            &[],
+        )?;
+
+        Ok(env.get_string(JString::from(class_name))?.into())
+    }
+
+    pub fn message(&self, env: &JNIEnv) -> Result<String, SignalJniError> {
+        let message: JObject = call_method_checked(
+            env,
+            self.exception_ref.as_obj(),
+            "getMessage",
+            jni_signature!(() -> java.lang.String),
+            &[],
+        )?;
+        Ok(env.get_string(JString::from(message))?.into())
+    }
+}
+
+impl fmt::Display for ThrownException {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let env = &self.jvm.attach_current_thread().map_err(|_| fmt::Error)?;
+
+        let exn_type = self.class_name(env);
+        let exn_type = exn_type.as_deref().unwrap_or("<unknown>");
+
+        if let Ok(message) = self.message(env) {
+            write!(f, "exception {} \"{}\"", exn_type, message)
+        } else {
+            write!(f, "exception {}", exn_type)
+        }
+    }
+}
+
+impl fmt::Debug for ThrownException {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let env = &self.jvm.attach_current_thread().map_err(|_| fmt::Error)?;
+
+        let exn_type = self.class_name(env);
+        let exn_type = exn_type.as_deref().unwrap_or("<unknown>");
+
+        let obj_addr = *self.exception_ref.as_obj();
+
+        if let Ok(message) = self.message(env) {
+            write!(f, "exception {} ({:p}) \"{}\"", exn_type, obj_addr, message)
+        } else {
+            write!(f, "exception {} ({:p})", exn_type, obj_addr)
+        }
+    }
+}
+
+impl std::error::Error for ThrownException {}

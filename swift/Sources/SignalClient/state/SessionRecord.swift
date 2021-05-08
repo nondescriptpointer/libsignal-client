@@ -31,18 +31,24 @@ public class SessionRecord: ClonableHandleOwner {
     public func serialize() -> [UInt8] {
         return failOnError {
             try invokeFnReturningArray {
-                signal_session_record_serialize(nativeHandle, $0, $1)
+                signal_session_record_serialize($0, $1, nativeHandle)
             }
         }
     }
 
-    public func remoteRegistrationId() throws -> UInt32 {
-        return try invokeFnReturningInteger {
-            signal_session_record_get_remote_registration_id(nativeHandle, $0)
-        }
+    public var hasCurrentState: Bool {
+        var result = false
+        failOnError(signal_session_record_has_current_state(&result, nativeHandle))
+        return result
     }
 
     public func archiveCurrentState() {
-        return failOnError(signal_session_record_archive_current_state(nativeHandle))
+        failOnError(signal_session_record_archive_current_state(nativeHandle))
+    }
+
+    public func remoteRegistrationId() throws -> UInt32 {
+        return try invokeFnReturningInteger {
+            signal_session_record_get_remote_registration_id($0, nativeHandle)
+        }
     }
 }

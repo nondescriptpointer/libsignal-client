@@ -1,22 +1,19 @@
 //
-// Copyright 2020 Signal Messenger, LLC.
+// Copyright 2020-2021 Signal Messenger, LLC.
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 
-use futures::pin_mut;
-use futures::task::noop_waker_ref;
-use libc::{c_char, c_uchar, c_uint, c_ulonglong, size_t};
+use device_transfer::Error as DeviceTransferError;
+use libc::{c_char, c_uchar, size_t};
 use libsignal_bridge::ffi::*;
-use libsignal_protocol_rust::*;
-use std::ffi::CStr;
-use std::future::Future;
-use std::task::{self, Poll};
-
-use aes_gcm_siv::Error as AesGcmSivError;
+use libsignal_protocol::*;
+use signal_crypto::Error as SignalCryptoError;
+use std::ffi::CString;
 
 #[derive(Debug)]
 #[repr(C)]
 pub enum SignalErrorCode {
+    #[allow(dead_code)]
     UnknownError = 1,
     InvalidState = 2,
     InternalError = 3,
@@ -33,12 +30,14 @@ pub enum SignalErrorCode {
     UnknownCiphertextVersion = 22,
     UnrecognizedMessageVersion = 23,
     InvalidMessage = 30,
+    SealedSenderSelfSend = 31,
 
     InvalidKey = 40,
     InvalidSignature = 41,
 
     FingerprintIdentifierMismatch = 50,
     FingerprintVersionMismatch = 51,
+    FingerprintParsingError = 52,
 
     UntrustedIdentity = 60,
 
@@ -56,9 +55,21 @@ impl From<&SignalFfiError> for SignalErrorCode {
         match err {
             SignalFfiError::NullPointer => SignalErrorCode::NullParameter,
             SignalFfiError::InvalidType => SignalErrorCode::InvalidType,
-            SignalFfiError::UnexpectedPanic(_) => SignalErrorCode::InternalError,
 
-            SignalFfiError::CallbackError(_) => SignalErrorCode::CallbackError,
+            SignalFfiError::UnexpectedPanic(_)
+            | SignalFfiError::Signal(SignalProtocolError::InternalError(_))
+            | SignalFfiError::DeviceTransfer(DeviceTransferError::InternalError(_))
+            | SignalFfiError::Signal(SignalProtocolError::FfiBindingError(_))
+            | SignalFfiError::Signal(SignalProtocolError::InvalidChainKeyLength(_))
+            | SignalFfiError::Signal(SignalProtocolError::InvalidRootKeyLength(_))
+            | SignalFfiError::Signal(SignalProtocolError::InvalidCipherCryptographicParameters(
+                _,
+                _,
+            ))
+            | SignalFfiError::Signal(SignalProtocolError::InvalidMacKeyLength(_)) => {
+                SignalErrorCode::InternalError
+            }
+
             SignalFfiError::InvalidUtf8String => SignalErrorCode::InvalidUtf8String,
             SignalFfiError::InsufficientOutputSize(_, _) => SignalErrorCode::InsufficientOutputSize,
 
@@ -72,9 +83,12 @@ impl From<&SignalFfiError> for SignalErrorCode {
             }
 
             SignalFfiError::Signal(SignalProtocolError::InvalidPreKeyId)
-            | SignalFfiError::Signal(SignalProtocolError::InvalidSignedPreKeyId)
-            | SignalFfiError::Signal(SignalProtocolError::InvalidSenderKeyId) => {
+            | SignalFfiError::Signal(SignalProtocolError::InvalidSignedPreKeyId) => {
                 SignalErrorCode::InvalidKeyIdentifier
+            }
+
+            SignalFfiError::Signal(SignalProtocolError::SealedSenderSelfSend) => {
+                SignalErrorCode::SealedSenderSelfSend
             }
 
             SignalFfiError::Signal(SignalProtocolError::SignatureValidationFailed) => {
@@ -84,11 +98,12 @@ impl From<&SignalFfiError> for SignalErrorCode {
             SignalFfiError::Signal(SignalProtocolError::NoKeyTypeIdentifier)
             | SignalFfiError::Signal(SignalProtocolError::BadKeyType(_))
             | SignalFfiError::Signal(SignalProtocolError::BadKeyLength(_, _))
-            | SignalFfiError::AesGcmSiv(AesGcmSivError::InvalidKeySize) => {
+            | SignalFfiError::DeviceTransfer(DeviceTransferError::KeyDecodingFailed)
+            | SignalFfiError::SignalCrypto(SignalCryptoError::InvalidKeySize) => {
                 SignalErrorCode::InvalidKey
             }
 
-            SignalFfiError::Signal(SignalProtocolError::SessionNotFound) => {
+            SignalFfiError::Signal(SignalProtocolError::SessionNotFound(_)) => {
                 SignalErrorCode::SessionNotFound
             }
 
@@ -96,13 +111,17 @@ impl From<&SignalFfiError> for SignalErrorCode {
                 SignalErrorCode::FingerprintIdentifierMismatch
             }
 
-            SignalFfiError::Signal(SignalProtocolError::FingerprintVersionMismatch) => {
+            SignalFfiError::Signal(SignalProtocolError::FingerprintParsingError) => {
+                SignalErrorCode::FingerprintParsingError
+            }
+
+            SignalFfiError::Signal(SignalProtocolError::FingerprintVersionMismatch(_, _)) => {
                 SignalErrorCode::FingerprintVersionMismatch
             }
 
             SignalFfiError::Signal(SignalProtocolError::CiphertextMessageTooShort(_))
             | SignalFfiError::Signal(SignalProtocolError::InvalidCiphertext)
-            | SignalFfiError::AesGcmSiv(AesGcmSivError::InvalidTag) => {
+            | SignalFfiError::SignalCrypto(SignalCryptoError::InvalidTag) => {
                 SignalErrorCode::InvalidCiphertext
             }
 
@@ -136,273 +155,48 @@ impl From<&SignalFfiError> for SignalErrorCode {
             }
 
             SignalFfiError::Signal(SignalProtocolError::InvalidArgument(_))
-            | SignalFfiError::AesGcmSiv(_) => SignalErrorCode::InvalidArgument,
+            | SignalFfiError::SignalCrypto(_) => SignalErrorCode::InvalidArgument,
 
-            _ => SignalErrorCode::UnknownError,
+            SignalFfiError::Signal(SignalProtocolError::ApplicationCallbackError(_, _)) => {
+                SignalErrorCode::CallbackError
+            }
         }
     }
 }
 
-#[track_caller]
-pub fn expect_ready<F: Future>(future: F) -> F::Output {
-    pin_mut!(future);
-    match future.poll(&mut task::Context::from_waker(noop_waker_ref())) {
-        Poll::Ready(result) => result,
-        Poll::Pending => panic!("future was not ready"),
-    }
-}
-
-pub unsafe fn box_optional_object<T>(
-    p: *mut *mut T,
-    obj: Result<Option<T>, SignalProtocolError>,
-) -> Result<(), SignalFfiError> {
-    if p.is_null() {
-        return Err(SignalFfiError::NullPointer);
-    }
-    match obj {
-        Ok(Some(o)) => {
-            *p = Box::into_raw(Box::new(o));
-            Ok(())
-        }
-        Ok(None) => {
-            *p = std::ptr::null_mut();
-            Ok(())
-        }
-        Err(e) => {
-            *p = std::ptr::null_mut();
-            Err(SignalFfiError::Signal(e))
-        }
-    }
-}
-
-pub unsafe fn as_slice<'a>(
+pub(crate) unsafe fn as_slice<'a>(
     input: *const c_uchar,
     input_len: size_t,
 ) -> Result<&'a [u8], SignalFfiError> {
-    if input.is_null() {
-        if input_len != 0 {
-            return Err(SignalFfiError::NullPointer);
-        }
-        // We can't just fall through because slice::from_raw_parts still expects a non-null pointer. Reference a dummy buffer instead.
-        return Ok(&[]);
-    }
-
-    Ok(std::slice::from_raw_parts(input, input_len as usize))
+    SizedArgTypeInfo::convert_from(input, input_len)
 }
 
-pub unsafe fn as_slice_mut<'a>(
-    input: *mut c_uchar,
-    input_len: size_t,
-) -> Result<&'a mut [u8], SignalFfiError> {
-    if input.is_null() {
-        if input_len != 0 {
-            return Err(SignalFfiError::NullPointer);
-        }
-        // We can't just fall through because slice::from_raw_parts still expects a non-null pointer. Reference a dummy buffer instead.
-        return Ok(&mut []);
-    }
-
-    Ok(std::slice::from_raw_parts_mut(input, input_len as usize))
+pub(crate) unsafe fn write_cstr_to(
+    out: *mut *const c_char,
+    value: Result<impl Into<Vec<u8>>, SignalProtocolError>,
+) -> Result<(), SignalFfiError> {
+    write_optional_cstr_to(out, value.map(Some))
 }
 
-pub unsafe fn native_handle_cast_optional<T>(
-    handle: *const T,
-) -> Result<Option<&'static T>, SignalFfiError> {
-    if handle.is_null() {
-        return Ok(None);
-    }
-
-    Ok(Some(&*(handle)))
-}
-
-pub unsafe fn native_handle_cast_mut<T>(handle: *mut T) -> Result<&'static mut T, SignalFfiError> {
-    if handle.is_null() {
-        return Err(SignalFfiError::NullPointer);
-    }
-
-    Ok(&mut *handle)
-}
-
-pub unsafe fn get_optional_uint32(p: *const c_uint) -> Option<u32> {
-    if p.is_null() {
-        return None;
-    }
-
-    if *p == 0xFFFFFFFF {
-        return None;
-    }
-
-    Some(*p)
-}
-
-pub unsafe fn read_c_string(cstr: *const c_char) -> Result<String, SignalFfiError> {
-    if cstr.is_null() {
-        return Err(SignalFfiError::NullPointer);
-    }
-
-    match CStr::from_ptr(cstr).to_str() {
-        Ok(s) => Ok(s.to_owned()),
-        Err(_) => Err(SignalFfiError::InvalidUtf8String),
-    }
-}
-
-pub unsafe fn read_optional_c_string(
-    cstr: *const c_char,
-) -> Result<Option<String>, SignalFfiError> {
-    if cstr.is_null() {
-        return Ok(None);
-    }
-
-    match CStr::from_ptr(cstr).to_str() {
-        Ok(s) => Ok(Some(s.to_owned())),
-        Err(_) => Err(SignalFfiError::InvalidUtf8String),
-    }
-}
-
-pub fn write_uint32_to(
-    out: *mut c_uint,
-    value: Result<u32, SignalProtocolError>,
+pub(crate) unsafe fn write_optional_cstr_to(
+    out: *mut *const c_char,
+    value: Result<Option<impl Into<Vec<u8>>>, SignalProtocolError>,
 ) -> Result<(), SignalFfiError> {
     if out.is_null() {
         return Err(SignalFfiError::NullPointer);
     }
 
     match value {
-        Ok(value) => {
-            unsafe {
-                *out = value;
-            }
+        Ok(Some(value)) => {
+            let cstr =
+                CString::new(value).expect("No NULL characters in string being returned to C");
+            *out = cstr.into_raw();
+            Ok(())
+        }
+        Ok(None) => {
+            *out = std::ptr::null();
             Ok(())
         }
         Err(e) => Err(SignalFfiError::Signal(e)),
     }
-}
-
-pub fn write_optional_uint32_to(
-    out: *mut c_uint,
-    value: Result<Option<u32>, SignalProtocolError>,
-) -> Result<(), SignalFfiError> {
-    if out.is_null() {
-        return Err(SignalFfiError::NullPointer);
-    }
-
-    match value {
-        Ok(value) => {
-            let value = value.unwrap_or(0xFFFFFFFF);
-            unsafe {
-                *out = value;
-            }
-            Ok(())
-        }
-        Err(e) => Err(SignalFfiError::Signal(e)),
-    }
-}
-
-pub fn write_uint64_to(
-    out: *mut c_ulonglong,
-    value: Result<u64, SignalProtocolError>,
-) -> Result<(), SignalFfiError> {
-    if out.is_null() {
-        return Err(SignalFfiError::NullPointer);
-    }
-
-    match value {
-        Ok(value) => {
-            unsafe {
-                *out = value;
-            }
-            Ok(())
-        }
-        Err(e) => Err(SignalFfiError::Signal(e)),
-    }
-}
-
-#[macro_export]
-macro_rules! ffi_fn_get_new_boxed_obj {
-    ( $nm:ident($rt:ty) from $typ:ty, $body:expr ) => {
-        #[no_mangle]
-        pub unsafe extern "C" fn $nm(
-            new_obj: *mut *mut $rt,
-            obj: *const $typ,
-        ) -> *mut SignalFfiError {
-            run_ffi_safe(|| {
-                let obj = native_handle_cast::<$typ>(obj)?;
-                box_object::<$rt>(new_obj, $body(obj))
-            })
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! ffi_fn_clone {
-    ( $nm:ident clones $typ:ty) => {
-        #[no_mangle]
-        pub unsafe extern "C" fn $nm(
-            new_obj: *mut *mut $typ,
-            obj: *const $typ,
-        ) -> *mut SignalFfiError {
-            run_ffi_safe(|| {
-                let obj = native_handle_cast::<$typ>(obj)?;
-                box_object::<$typ>(new_obj, Ok(obj.clone()))
-            })
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! ffi_fn_get_new_boxed_optional_obj {
-    ( $nm:ident($rt:ty) from $typ:ty, $body:expr ) => {
-        #[no_mangle]
-        pub unsafe extern "C" fn $nm(
-            new_obj: *mut *mut $rt,
-            obj: *const $typ,
-        ) -> *mut SignalFfiError {
-            run_ffi_safe(|| {
-                let obj = native_handle_cast::<$typ>(obj)?;
-                box_optional_object::<$rt>(new_obj, $body(obj))
-            })
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! ffi_fn_get_uint32 {
-    ( $nm:ident($typ:ty) using $body:expr ) => {
-        #[no_mangle]
-        pub unsafe extern "C" fn $nm(obj: *const $typ, out: *mut c_uint) -> *mut SignalFfiError {
-            run_ffi_safe(|| {
-                let obj = native_handle_cast::<$typ>(obj)?;
-                write_uint32_to(out, $body(&obj))
-            })
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! ffi_fn_get_optional_uint32 {
-    ( $nm:ident($typ:ty) using $body:expr ) => {
-        #[no_mangle]
-        pub unsafe extern "C" fn $nm(obj: *const $typ, out: *mut c_uint) -> *mut SignalFfiError {
-            run_ffi_safe(|| {
-                let obj = native_handle_cast::<$typ>(obj)?;
-                write_optional_uint32_to(out, $body(&obj))
-            })
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! ffi_fn_get_uint64 {
-    ( $nm:ident($typ:ty) using $body:expr ) => {
-        #[no_mangle]
-        pub unsafe extern "C" fn $nm(
-            obj: *const $typ,
-            out: *mut c_ulonglong,
-        ) -> *mut SignalFfiError {
-            run_ffi_safe(|| {
-                let obj = native_handle_cast::<$typ>(obj)?;
-                write_uint64_to(out, $body(&obj))
-            })
-        }
-    };
 }

@@ -3,28 +3,30 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 
-use crate::error::{Result, SignalProtocolError};
 use crate::ratchet::{ChainKey, MessageKeys, RootKey};
-use crate::IdentityKey;
+use crate::{IdentityKey, KeyPair, PrivateKey, PublicKey, Result, SignalProtocolError, HKDF};
 
 use crate::consts;
-use crate::curve;
-use crate::kdf;
 use crate::proto::storage::session_structure;
 use crate::proto::storage::{RecordStructure, SessionStructure};
+use crate::state::{PreKeyId, SignedPreKeyId};
 use prost::Message;
 
 use std::collections::VecDeque;
 
 #[derive(Debug, Clone)]
-pub struct UnacknowledgedPreKeyMessageItems {
-    pre_key_id: Option<u32>,
-    signed_pre_key_id: u32,
-    base_key: curve::PublicKey,
+pub(crate) struct UnacknowledgedPreKeyMessageItems {
+    pre_key_id: Option<PreKeyId>,
+    signed_pre_key_id: SignedPreKeyId,
+    base_key: PublicKey,
 }
 
 impl UnacknowledgedPreKeyMessageItems {
-    fn new(pre_key_id: Option<u32>, signed_pre_key_id: u32, base_key: curve::PublicKey) -> Self {
+    fn new(
+        pre_key_id: Option<PreKeyId>,
+        signed_pre_key_id: SignedPreKeyId,
+        base_key: PublicKey,
+    ) -> Self {
         Self {
             pre_key_id,
             signed_pre_key_id,
@@ -32,30 +34,25 @@ impl UnacknowledgedPreKeyMessageItems {
         }
     }
 
-    pub fn pre_key_id(&self) -> Result<Option<u32>> {
+    pub(crate) fn pre_key_id(&self) -> Result<Option<PreKeyId>> {
         Ok(self.pre_key_id)
     }
 
-    pub fn signed_pre_key_id(&self) -> Result<u32> {
+    pub(crate) fn signed_pre_key_id(&self) -> Result<SignedPreKeyId> {
         Ok(self.signed_pre_key_id)
     }
 
-    pub fn base_key(&self) -> Result<&curve::PublicKey> {
+    pub(crate) fn base_key(&self) -> Result<&PublicKey> {
         Ok(&self.base_key)
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct SessionState {
+pub(crate) struct SessionState {
     session: SessionStructure,
 }
 
 impl SessionState {
-    pub fn deserialize(bytes: &[u8]) -> Result<Self> {
-        let session = SessionStructure::decode(bytes)?;
-        Ok(Self { session })
-    }
-
     pub(crate) fn new(session: SessionStructure) -> Self {
         Self { session }
     }
@@ -99,6 +96,16 @@ impl SessionState {
         Ok(self.local_identity_key()?.serialize().to_vec())
     }
 
+    pub(crate) fn session_with_self(&self) -> Result<bool> {
+        if let Some(remote_id) = self.remote_identity_key_bytes()? {
+            let local_id = self.local_identity_key_bytes()?;
+            return Ok(remote_id == local_id);
+        }
+
+        // If remote ID is not set then we can't be sure but treat as non-self
+        Ok(false)
+    }
+
     pub(crate) fn previous_counter(&self) -> Result<u32> {
         Ok(self.session.previous_counter)
     }
@@ -112,7 +119,7 @@ impl SessionState {
         if self.session.root_key.len() != 32 {
             return Err(SignalProtocolError::InvalidProtobufEncoding);
         }
-        let hkdf = kdf::HKDF::new(self.session_version()?)?;
+        let hkdf = HKDF::new(self.session_version()?)?;
         RootKey::new(hkdf, &self.session.root_key)
     }
 
@@ -121,17 +128,23 @@ impl SessionState {
         Ok(())
     }
 
-    pub(crate) fn sender_ratchet_key(&self) -> Result<curve::PublicKey> {
+    pub(crate) fn sender_ratchet_key(&self) -> Result<PublicKey> {
         match self.session.sender_chain {
             None => Err(SignalProtocolError::InvalidProtobufEncoding),
-            Some(ref c) => curve::decode_point(&c.sender_ratchet_key),
+            Some(ref c) => PublicKey::deserialize(&c.sender_ratchet_key),
         }
     }
 
-    pub(crate) fn sender_ratchet_private_key(&self) -> Result<curve::PrivateKey> {
+    pub(crate) fn sender_ratchet_key_for_logging(&self) -> Result<String> {
+        self.sender_ratchet_key()?
+            .public_key_bytes()
+            .map(hex::encode)
+    }
+
+    pub(crate) fn sender_ratchet_private_key(&self) -> Result<PrivateKey> {
         match self.session.sender_chain {
             None => Err(SignalProtocolError::InvalidProtobufEncoding),
-            Some(ref c) => Ok(curve::decode_private_point(&c.sender_ratchet_key_private)?),
+            Some(ref c) => PrivateKey::deserialize(&c.sender_ratchet_key_private),
         }
     }
 
@@ -139,9 +152,24 @@ impl SessionState {
         Ok(self.session.sender_chain.is_some())
     }
 
+    pub(crate) fn all_receiver_chain_logging_info(&self) -> Result<Vec<(Vec<u8>, Option<u32>)>> {
+        let mut results = vec![];
+        for chain in self.session.receiver_chains.iter() {
+            let sender_ratchet_public = chain.sender_ratchet_key.clone();
+
+            let chain_key_idx = match &chain.chain_key {
+                Some(chain_key) => Some(chain_key.index),
+                None => None,
+            };
+
+            results.push((sender_ratchet_public, chain_key_idx))
+        }
+        Ok(results)
+    }
+
     pub(crate) fn get_receiver_chain(
         &self,
-        sender: &curve::PublicKey,
+        sender: &PublicKey,
     ) -> Result<Option<(session_structure::Chain, usize)>> {
         let sender_bytes = sender.serialize();
 
@@ -151,7 +179,7 @@ impl SessionState {
             be faster, but may miss non-canonical points. It's unclear if supporting such
             points is desirable.
             */
-            let this_point = curve::decode_point(&chain.sender_ratchet_key)?.serialize();
+            let this_point = PublicKey::deserialize(&chain.sender_ratchet_key)?.serialize();
 
             if this_point == sender_bytes {
                 return Ok(Some((chain.clone(), idx)));
@@ -161,10 +189,7 @@ impl SessionState {
         Ok(None)
     }
 
-    pub(crate) fn get_receiver_chain_key(
-        &self,
-        sender: &curve::PublicKey,
-    ) -> Result<Option<ChainKey>> {
+    pub(crate) fn get_receiver_chain_key(&self, sender: &PublicKey) -> Result<Option<ChainKey>> {
         match self.get_receiver_chain(sender)? {
             None => Ok(None),
             Some((chain, _)) => match chain.chain_key {
@@ -173,7 +198,7 @@ impl SessionState {
                     if c.key.len() != 32 {
                         return Err(SignalProtocolError::InvalidProtobufEncoding);
                     }
-                    let hkdf = kdf::HKDF::new(self.session_version()?)?;
+                    let hkdf = HKDF::new(self.session_version()?)?;
                     Ok(Some(ChainKey::new(hkdf, &c.key, c.index)?))
                 }
             },
@@ -182,7 +207,7 @@ impl SessionState {
 
     pub(crate) fn add_receiver_chain(
         &mut self,
-        sender: &curve::PublicKey,
+        sender: &PublicKey,
         chain_key: &ChainKey,
     ) -> Result<()> {
         let chain_key = session_structure::chain::ChainKey {
@@ -200,6 +225,12 @@ impl SessionState {
         self.session.receiver_chains.push(chain);
 
         if self.session.receiver_chains.len() > consts::MAX_RECEIVER_CHAINS {
+            log::info!(
+                "Trimming excessive receiver_chain for session with base key {}, chain count: {}",
+                self.sender_ratchet_key_for_logging()
+                    .unwrap_or_else(|e| format!("<error: {}>", e)),
+                self.session.receiver_chains.len()
+            );
             self.session.receiver_chains.remove(0);
         }
 
@@ -208,7 +239,7 @@ impl SessionState {
 
     pub(crate) fn set_sender_chain(
         &mut self,
-        sender: &curve::KeyPair,
+        sender: &KeyPair,
         next_chain_key: &ChainKey,
     ) -> Result<()> {
         let chain_key = session_structure::chain::ChainKey {
@@ -237,7 +268,7 @@ impl SessionState {
             SignalProtocolError::InvalidState("get_sender_chain_key", "No chain key".to_owned())
         })?;
 
-        let hkdf = kdf::HKDF::new(self.session_version()?)?;
+        let hkdf = HKDF::new(self.session_version()?)?;
         ChainKey::new(hkdf, &chain_key.key, chain_key.index)
     }
 
@@ -273,7 +304,7 @@ impl SessionState {
 
     pub(crate) fn get_message_keys(
         &mut self,
-        sender: &curve::PublicKey,
+        sender: &PublicKey,
         counter: u32,
     ) -> Result<Option<MessageKeys>> {
         if let Some(mut chain_and_index) = self.get_receiver_chain(sender)? {
@@ -303,7 +334,7 @@ impl SessionState {
 
     pub(crate) fn set_message_keys(
         &mut self,
-        sender: &curve::PublicKey,
+        sender: &PublicKey,
         message_keys: &MessageKeys,
     ) -> Result<()> {
         let new_keys = session_structure::chain::MessageKey {
@@ -333,7 +364,7 @@ impl SessionState {
 
     pub(crate) fn set_receiver_chain_key(
         &mut self,
-        sender: &curve::PublicKey,
+        sender: &PublicKey,
         chain_key: &ChainKey,
     ) -> Result<()> {
         if let Some(chain_and_index) = self.get_receiver_chain(sender)? {
@@ -355,9 +386,9 @@ impl SessionState {
 
     pub(crate) fn set_unacknowledged_pre_key_message(
         &mut self,
-        pre_key_id: Option<u32>,
-        signed_pre_key_id: u32,
-        base_key: &curve::PublicKey,
+        pre_key_id: Option<PreKeyId>,
+        signed_pre_key_id: SignedPreKeyId,
+        base_key: &PublicKey,
     ) -> Result<()> {
         let pending = session_structure::PendingPreKey {
             pre_key_id: pre_key_id.unwrap_or(0),
@@ -377,8 +408,8 @@ impl SessionState {
                     0 => None,
                     v => Some(v),
                 },
-                pending_pre_key.signed_pre_key_id as u32,
-                curve::decode_point(&pending_pre_key.base_key)?,
+                pending_pre_key.signed_pre_key_id as SignedPreKeyId,
+                PublicKey::deserialize(&pending_pre_key.base_key)?,
             )))
         } else {
             Ok(None)
@@ -407,12 +438,6 @@ impl SessionState {
     pub(crate) fn local_registration_id(&self) -> Result<u32> {
         Ok(self.session.local_registration_id)
     }
-
-    pub fn serialize(&self) -> Result<Vec<u8>> {
-        let mut buf = vec![];
-        self.session.encode(&mut buf)?;
-        Ok(buf)
-    }
 }
 
 impl From<SessionStructure> for SessionState {
@@ -435,8 +460,8 @@ impl From<&SessionState> for SessionStructure {
 
 #[derive(Clone, Debug)]
 pub struct SessionRecord {
-    pub current_session: Option<SessionState>,
-    pub previous_sessions: VecDeque<SessionState>,
+    current_session: Option<SessionState>,
+    previous_sessions: VecDeque<SessionState>,
 }
 
 impl SessionRecord {
@@ -447,7 +472,7 @@ impl SessionRecord {
         }
     }
 
-    pub fn new(state: SessionState) -> Self {
+    pub(crate) fn new(state: SessionState) -> Self {
         Self {
             current_session: Some(state),
             previous_sessions: VecDeque::new(),
@@ -465,6 +490,14 @@ impl SessionRecord {
         Ok(Self {
             current_session: record.current_session.map(|s| s.into()),
             previous_sessions: previous,
+        })
+    }
+
+    pub fn from_single_session_state(bytes: &[u8]) -> Result<Self> {
+        let session = SessionState::new(SessionStructure::decode(bytes)?);
+        Ok(Self {
+            current_session: Some(session),
+            previous_sessions: VecDeque::new(),
         })
     }
 
@@ -488,7 +521,11 @@ impl SessionRecord {
         Ok(false)
     }
 
-    pub fn session_state(&self) -> Result<&SessionState> {
+    pub fn has_current_session_state(&self) -> bool {
+        self.current_session.is_some()
+    }
+
+    pub(crate) fn session_state(&self) -> Result<&SessionState> {
         if let Some(ref session) = self.current_session {
             Ok(session)
         } else {
@@ -543,6 +580,8 @@ impl SessionRecord {
             if self.previous_sessions.len() > consts::ARCHIVED_STATES_MAX_LENGTH {
                 self.previous_sessions.pop_back();
             }
+        } else {
+            log::info!("Skipping archive, current session state is fresh",);
         }
 
         Ok(())
@@ -580,14 +619,17 @@ impl SessionRecord {
     }
 
     pub fn has_sender_chain(&self) -> Result<bool> {
-        self.session_state()?.has_sender_chain()
+        match &self.current_session {
+            Some(session) => session.has_sender_chain(),
+            None => Ok(false),
+        }
     }
 
     pub fn alice_base_key(&self) -> Result<&[u8]> {
         self.session_state()?.alice_base_key()
     }
 
-    pub fn get_receiver_chain_key(&self, sender: &curve::PublicKey) -> Result<Option<ChainKey>> {
+    pub fn get_receiver_chain_key(&self, sender: &PublicKey) -> Result<Option<ChainKey>> {
         self.session_state()?.get_receiver_chain_key(sender)
     }
 

@@ -35,7 +35,7 @@ public class PublicKey: ClonableHandleOwner {
     public var keyBytes: [UInt8] {
         return failOnError {
             try invokeFnReturningArray {
-                signal_publickey_get_public_key_bytes(nativeHandle, $0, $1)
+                signal_publickey_get_public_key_bytes($0, $1, nativeHandle)
             }
         }
     }
@@ -43,7 +43,7 @@ public class PublicKey: ClonableHandleOwner {
     public func serialize() -> [UInt8] {
         return failOnError {
             try invokeFnReturningArray {
-                signal_publickey_serialize(nativeHandle, $0, $1)
+                signal_publickey_serialize($0, $1, nativeHandle)
             }
         }
     }
@@ -53,7 +53,7 @@ public class PublicKey: ClonableHandleOwner {
         var result: Bool = false
         try message.withUnsafeBytes { messageBytes in
             try signature.withUnsafeBytes { signatureBytes in
-                try checkError(signal_publickey_verify(nativeHandle, &result, messageBytes.baseAddress?.assumingMemoryBound(to: UInt8.self), messageBytes.count, signatureBytes.baseAddress?.assumingMemoryBound(to: UInt8.self), signatureBytes.count))
+                try checkError(signal_publickey_verify(&result, nativeHandle, messageBytes.baseAddress?.assumingMemoryBound(to: UInt8.self), messageBytes.count, signatureBytes.baseAddress?.assumingMemoryBound(to: UInt8.self), signatureBytes.count))
             }
         }
         return result

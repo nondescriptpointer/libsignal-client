@@ -3,20 +3,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 
-use crate::curve;
-use crate::IdentityKey;
-
-use crate::error::{Result, SignalProtocolError};
 use crate::state::{PreKeyId, SignedPreKeyId};
+use crate::{IdentityKey, PublicKey, Result};
 
 #[derive(Debug, Clone)]
 pub struct PreKeyBundle {
     registration_id: u32,
     device_id: u32,
     pre_key_id: Option<PreKeyId>,
-    pre_key_public: Option<curve::PublicKey>,
+    pre_key_public: Option<PublicKey>,
     signed_pre_key_id: SignedPreKeyId,
-    signed_pre_key_public: curve::PublicKey,
+    signed_pre_key_public: PublicKey,
     signed_pre_key_signature: Vec<u8>,
     identity_key: IdentityKey,
 }
@@ -25,16 +22,16 @@ impl PreKeyBundle {
     pub fn new(
         registration_id: u32,
         device_id: u32,
-        pre_key_id: Option<PreKeyId>,
-        pre_key_public: Option<curve::PublicKey>,
+        pre_key: Option<(PreKeyId, PublicKey)>,
         signed_pre_key_id: SignedPreKeyId,
-        signed_pre_key_public: curve::PublicKey,
+        signed_pre_key_public: PublicKey,
         signed_pre_key_signature: Vec<u8>,
         identity_key: IdentityKey,
     ) -> Result<Self> {
-        if pre_key_public.is_some() != pre_key_id.is_some() {
-            return Err(SignalProtocolError::InvalidPreKeyBundle);
-        }
+        let (pre_key_id, pre_key_public) = match pre_key {
+            None => (None, None),
+            Some((id, key)) => (Some(id), Some(key)),
+        };
 
         Ok(Self {
             registration_id,
@@ -60,7 +57,7 @@ impl PreKeyBundle {
         Ok(self.pre_key_id)
     }
 
-    pub fn pre_key_public(&self) -> Result<Option<curve::PublicKey>> {
+    pub fn pre_key_public(&self) -> Result<Option<PublicKey>> {
         Ok(self.pre_key_public)
     }
 
@@ -68,7 +65,7 @@ impl PreKeyBundle {
         Ok(self.signed_pre_key_id)
     }
 
-    pub fn signed_pre_key_public(&self) -> Result<curve::PublicKey> {
+    pub fn signed_pre_key_public(&self) -> Result<PublicKey> {
         Ok(self.signed_pre_key_public)
     }
 

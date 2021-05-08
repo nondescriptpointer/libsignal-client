@@ -1,22 +1,25 @@
 //
-// Copyright 2020 Signal Messenger, LLC.
+// Copyright 2020-2021 Signal Messenger, LLC.
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 
+use std::convert::TryFrom;
 use std::fmt;
 
-use aes_gcm_siv::Error as AesGcmSivError;
-use libsignal_protocol_rust::*;
+use device_transfer::Error as DeviceTransferError;
+use libsignal_protocol::*;
+use signal_crypto::Error as SignalCryptoError;
 
+/// The top-level error type (opaquely) returned to C clients when something goes wrong.
 #[derive(Debug)]
 pub enum SignalFfiError {
     Signal(SignalProtocolError),
-    AesGcmSiv(AesGcmSivError),
+    DeviceTransfer(DeviceTransferError),
+    SignalCrypto(SignalCryptoError),
     InsufficientOutputSize(usize, usize),
     NullPointer,
     InvalidUtf8String,
     UnexpectedPanic(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
-    CallbackError(i32),
     InvalidType,
 }
 
@@ -24,11 +27,11 @@ impl fmt::Display for SignalFfiError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             SignalFfiError::Signal(s) => write!(f, "{}", s),
-            SignalFfiError::CallbackError(c) => {
-                write!(f, "callback invocation returned error code {}", c)
+            SignalFfiError::DeviceTransfer(c) => {
+                write!(f, "Device transfer operation failed: {}", c)
             }
-            SignalFfiError::AesGcmSiv(c) => {
-                write!(f, "AES-GCM-SIV operation failed: {}", c)
+            SignalFfiError::SignalCrypto(c) => {
+                write!(f, "Cryptographic operation failed: {}", c)
             }
             SignalFfiError::NullPointer => write!(f, "null pointer"),
             SignalFfiError::InvalidType => write!(f, "invalid type"),
@@ -51,8 +54,38 @@ impl From<SignalProtocolError> for SignalFfiError {
     }
 }
 
-impl From<AesGcmSivError> for SignalFfiError {
-    fn from(e: AesGcmSivError) -> SignalFfiError {
-        SignalFfiError::AesGcmSiv(e)
+impl From<DeviceTransferError> for SignalFfiError {
+    fn from(e: DeviceTransferError) -> SignalFfiError {
+        SignalFfiError::DeviceTransfer(e)
     }
 }
+
+impl From<SignalCryptoError> for SignalFfiError {
+    fn from(e: SignalCryptoError) -> SignalFfiError {
+        SignalFfiError::SignalCrypto(e)
+    }
+}
+
+pub type SignalFfiResult<T> = Result<T, SignalFfiError>;
+
+/// Represents an error returned by a callback, following the C conventions that 0 means "success".
+#[derive(Debug)]
+pub struct CallbackError {
+    value: std::num::NonZeroI32,
+}
+
+impl CallbackError {
+    /// Returns `None` if `value` is zero; otherwise, wraps the value in `Self`.
+    pub fn check(value: i32) -> Option<Self> {
+        let value = std::num::NonZeroI32::try_from(value).ok()?;
+        Some(Self { value })
+    }
+}
+
+impl fmt::Display for CallbackError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "error code {}", self.value)
+    }
+}
+
+impl std::error::Error for CallbackError {}

@@ -1,14 +1,30 @@
 #!/usr/bin/env python3
 
 #
-# Copyright (C) 2020 Signal Messenger, LLC.
+# Copyright (C) 2020-2021 Signal Messenger, LLC.
 # SPDX-License-Identifier: AGPL-3.0-only
 #
 
+import difflib
 import os
 import subprocess
 import re
 import sys
+
+
+# If the command-line handling below gets any more complicated, this should be switched to argparse.
+def print_usage_and_exit():
+    print('usage: %s [--verify]' % sys.argv[0], file=sys.stderr)
+    sys.exit(2)
+
+
+mode = None
+if len(sys.argv) > 2:
+    print_usage_and_exit()
+elif len(sys.argv) == 2:
+    mode = sys.argv[1]
+    if mode != '--verify':
+        print_usage_and_exit()
 
 our_abs_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -19,7 +35,12 @@ cbindgen = subprocess.Popen(['cbindgen'], cwd=os.path.join(our_abs_dir, '..'), s
 stdout = str(stdout.decode('utf8'))
 stderr = str(stderr.decode('utf8'))
 
-ignore_this_warning = re.compile(r"WARN: Can't find .*\. This usually means that this type was incompatible or not found\.")
+ignore_this_warning = re.compile(
+    "("
+    r"WARN: Can't find .*\. This usually means that this type was incompatible or not found\.|"
+    r"WARN: Missing `\[defines\]` entry for `feature = \".*\"` in cbindgen config\.|"
+    r"WARN: Skip libsignal-bridge::_ - \(not `pub`\)\."
+    ")")
 
 unknown_warning = False
 
@@ -30,7 +51,7 @@ for l in stderr.split('\n'):
     if ignore_this_warning.match(l):
         continue
 
-    print(l)
+    print(l, file=sys.stderr)
     unknown_warning = True
 
 if unknown_warning:
@@ -40,12 +61,15 @@ java_decl = re.compile(r'([a-zA-Z]+) Java_org_signal_client_internal_Native_([A-
 
 
 def translate_to_java(typ):
-    # jobject is not given here; instead use a type
+    # jobject as a return type is not given here; instead use a type
     type_map = {
         "void": "void",
         "jstring": "String",
         "JString": "String",
+        "JObject": "Object",
+        "JClass": "Class",
         "jbyteArray": "byte[]",
+        "jlongArray": "long[]",
         "ObjectHandle": "long",
         "jint": "int",
         "jlong": "long",
@@ -55,7 +79,9 @@ def translate_to_java(typ):
     if typ in type_map:
         return type_map[typ]
 
-    # Assume anything prefixed with Java refers to an object
+    # Assume anything prefixed with "Java" refers to an object
+    if typ.startswith('JavaReturn'):
+        return typ[10:]
     if typ.startswith('Java'):
         return typ[4:]
 
@@ -101,6 +127,17 @@ native_java = os.path.join(our_abs_dir, '../../../../java/java/src/main/java/org
 if not os.access(native_java, os.F_OK):
     raise Exception("Didn't find Native.java where it was expected")
 
-fh = open(native_java, 'w')
-fh.write(contents)
-fh.close()
+if not mode:
+    with open(native_java, 'w') as fh:
+        fh.write(contents)
+elif mode == '--verify':
+    with open(native_java) as fh:
+        current_contents = fh.readlines()
+    diff = difflib.unified_diff(current_contents, contents.splitlines(keepends=True))
+    first_line = next(diff, None)
+    if first_line:
+        sys.stdout.write(first_line)
+        sys.stdout.writelines(diff)
+        sys.exit("error: Native.java not up to date; re-run %s!" % sys.argv[0])
+else:
+    raise Exception("mode not properly validated")

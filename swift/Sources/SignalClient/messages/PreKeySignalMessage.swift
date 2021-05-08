@@ -29,12 +29,10 @@ public class PreKeySignalMessage {
                 identityKey: PublicKey,
                 message: SignalMessage) throws {
 
-        var preKeyId = preKeyId ?? 0xFFFFFFFF
-
         try checkError(signal_pre_key_signal_message_new(&handle,
                                                          version,
                                                          registrationId,
-                                                         &preKeyId,
+                                                         preKeyId ?? .max,
                                                          signedPreKeyId,
                                                          baseKey.nativeHandle,
                                                          identityKey.nativeHandle,
@@ -43,25 +41,25 @@ public class PreKeySignalMessage {
 
     public func serialize() throws -> [UInt8] {
         return try invokeFnReturningArray {
-            signal_pre_key_signal_message_serialize(handle, $0, $1)
+            signal_pre_key_signal_message_serialize($0, $1, handle)
         }
     }
 
     public func version() throws -> UInt32 {
         return try invokeFnReturningInteger {
-            signal_pre_key_signal_message_get_version(handle, $0)
+            signal_pre_key_signal_message_get_version($0, handle)
         }
     }
 
     public func registrationId() throws -> UInt32 {
         return try invokeFnReturningInteger {
-            signal_pre_key_signal_message_get_registration_id(handle, $0)
+            signal_pre_key_signal_message_get_registration_id($0, handle)
         }
     }
 
     public func preKeyId() throws -> UInt32? {
         let id = try invokeFnReturningInteger {
-            signal_pre_key_signal_message_get_pre_key_id(handle, $0)
+            signal_pre_key_signal_message_get_pre_key_id($0, handle)
         }
 
         if id == 0xFFFFFFFF {
@@ -74,7 +72,7 @@ public class PreKeySignalMessage {
     public var signedPreKeyId: UInt32 {
         return failOnError {
             try invokeFnReturningInteger {
-                signal_pre_key_signal_message_get_signed_pre_key_id(handle, $0)
+                signal_pre_key_signal_message_get_signed_pre_key_id($0, handle)
             }
         }
     }

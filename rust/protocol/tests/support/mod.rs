@@ -3,15 +3,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 
-use libsignal_protocol_rust::*;
+use libsignal_protocol::*;
 use rand::{rngs::OsRng, CryptoRng, Rng};
 
-pub fn test_in_memory_protocol_store() -> InMemSignalProtocolStore {
+pub fn test_in_memory_protocol_store() -> Result<InMemSignalProtocolStore, SignalProtocolError> {
     let mut csprng = OsRng;
     let identity_key = IdentityKeyPair::generate(&mut csprng);
     let registration_id = 5; // fixme randomly generate this
 
-    InMemSignalProtocolStore::new(identity_key, registration_id).unwrap()
+    InMemSignalProtocolStore::new(identity_key, registration_id)
 }
 
 #[allow(dead_code)]
@@ -50,7 +50,7 @@ pub async fn decrypt(
     .await
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, clippy::eval_order_dependence)]
 pub async fn create_pre_key_bundle<R: Rng + CryptoRng>(
     store: &mut dyn ProtocolStore,
     mut csprng: &mut R,
@@ -72,8 +72,7 @@ pub async fn create_pre_key_bundle<R: Rng + CryptoRng>(
     let pre_key_bundle = PreKeyBundle::new(
         store.get_local_registration_id(None).await?,
         device_id,
-        Some(pre_key_id),
-        Some(pre_key_pair.public_key),
+        Some((pre_key_id, pre_key_pair.public_key)),
         signed_pre_key_id,
         signed_pre_key_pair.public_key,
         signed_pre_key_signature.to_vec(),
