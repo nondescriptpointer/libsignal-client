@@ -12,10 +12,11 @@ use crate::{
 use crate::crypto;
 use crate::proto;
 use crate::session_cipher;
+use aes_gcm_siv::aead::{AeadInPlace, NewAead};
+use aes_gcm_siv::Aes256GcmSiv;
 use curve25519_dalek::scalar::Scalar;
 use prost::Message;
 use rand::{CryptoRng, Rng};
-use signal_crypto::Aes256GcmSiv;
 use std::convert::{TryFrom, TryInto};
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
@@ -266,7 +267,7 @@ impl SenderCertificate {
     }
 
     pub fn validate(&self, trust_root: &PublicKey, validation_time: u64) -> Result<bool> {
-        if !self.signer.validate(&trust_root)? {
+        if !self.signer.validate(trust_root)? {
             log::error!("received server certificate not signed by trust root");
             return Ok(false);
         }
@@ -724,8 +725,8 @@ pub async fn sealed_sender_encrypt_from_usmc<R: Rng + CryptoRng>(
 
     let static_key_ctext = crypto::aes256_ctr_hmacsha256_encrypt(
         &our_identity.public_key().serialize(),
-        &eph_keys.cipher_key()?,
-        &eph_keys.mac_key()?,
+        eph_keys.cipher_key()?,
+        eph_keys.mac_key()?,
     )?;
 
     let static_keys = sealed_sender_v1::StaticKeys::calculate(
@@ -737,13 +738,12 @@ pub async fn sealed_sender_encrypt_from_usmc<R: Rng + CryptoRng>(
 
     let message_data = crypto::aes256_ctr_hmacsha256_encrypt(
         usmc.serialized()?,
-        &static_keys.cipher_key()?,
-        &static_keys.mac_key()?,
+        static_keys.cipher_key()?,
+        static_keys.mac_key()?,
     )?;
 
     let version = SEALED_SENDER_V1_VERSION;
-    let mut serialized = vec![];
-    serialized.push(version | (version << 4));
+    let mut serialized = vec![version | (version << 4)];
     let pb = proto::sealed_sender::UnidentifiedSenderMessage {
         ephemeral_public: Some(ephemeral.public_key.serialize().to_vec()),
         encrypted_static: Some(static_key_ctext),
@@ -801,10 +801,10 @@ mod sealed_sender_v2 {
         pub(super) fn calculate(m: &[u8]) -> DerivedKeys {
             let kdf = HKDF::new(3).expect("valid KDF version");
             let r = kdf
-                .derive_secrets(&m, LABEL_R, 64)
+                .derive_secrets(m, LABEL_R, 64)
                 .expect("valid use of KDF");
             let k = kdf
-                .derive_secrets(&m, LABEL_K, 32)
+                .derive_secrets(m, LABEL_K, 32)
                 .expect("valid use of KDF");
             let e_raw =
                 Scalar::from_bytes_mod_order_wide(r.as_ref().try_into().expect("64-byte slice"));
@@ -821,7 +821,7 @@ mod sealed_sender_v2 {
     ) -> Result<Box<[u8]>> {
         assert!(input.len() == 32);
 
-        let agreement = priv_key.calculate_agreement(&pub_key)?;
+        let agreement = priv_key.calculate_agreement(pub_key)?;
         let agreement_key_input = match direction {
             Direction::Sending => [
                 agreement,
@@ -851,7 +851,7 @@ mod sealed_sender_v2 {
         ephemeral_pub_key: &PublicKey,
         encrypted_message_key: &[u8],
     ) -> Result<Box<[u8]>> {
-        let agreement = priv_key.calculate_agreement(&pub_key)?;
+        let agreement = priv_key.calculate_agreement(pub_key)?;
         let mut agreement_key_input = agreement.into_vec();
         agreement_key_input.extend_from_slice(&ephemeral_pub_key.serialize());
         agreement_key_input.extend_from_slice(encrypted_message_key);
@@ -889,14 +889,14 @@ pub async fn sealed_sender_multi_recipient_encrypt<R: Rng + CryptoRng>(
     let e_pub = keys.e.public_key()?;
 
     let mut ciphertext = usmc.serialized()?.to_vec();
-    let tag = Aes256GcmSiv::new(&keys.k)
+    let tag = Aes256GcmSiv::new_from_slice(&keys.k)
         .and_then(|aes_gcm_siv| {
-            aes_gcm_siv.encrypt(
-                &mut ciphertext,
+            aes_gcm_siv.encrypt_in_place_detached(
                 // There's no nonce because the key is already one-use.
-                &[0; Aes256GcmSiv::NONCE_SIZE],
+                &aes_gcm_siv::Nonce::default(),
                 // And there's no associated data.
                 &[],
+                &mut ciphertext,
             )
         })
         .map_err(|err| {
@@ -959,7 +959,7 @@ pub async fn sealed_sender_multi_recipient_encrypt<R: Rng + CryptoRng>(
         serialized.extend_from_slice(&at_i);
     }
 
-    serialized.extend_from_slice(&e_pub.public_key_bytes()?);
+    serialized.extend_from_slice(e_pub.public_key_bytes()?);
     serialized.extend_from_slice(&ciphertext);
     serialized.extend_from_slice(&tag);
 
@@ -1032,15 +1032,15 @@ pub async fn sealed_sender_decrypt_to_usmc(
         } => {
             let eph_keys = sealed_sender_v1::EphemeralKeys::calculate(
                 &ephemeral_public,
-                &our_identity.public_key(),
-                &our_identity.private_key(),
+                our_identity.public_key(),
+                our_identity.private_key(),
                 false,
             )?;
 
             let message_key_bytes = crypto::aes256_ctr_hmacsha256_decrypt(
                 &encrypted_static,
-                &eph_keys.cipher_key()?,
-                &eph_keys.mac_key()?,
+                eph_keys.cipher_key()?,
+                eph_keys.mac_key()?,
             )?;
 
             let static_key = PublicKey::try_from(&message_key_bytes[..])?;
@@ -1054,8 +1054,8 @@ pub async fn sealed_sender_decrypt_to_usmc(
 
             let message_bytes = crypto::aes256_ctr_hmacsha256_decrypt(
                 &encrypted_message,
-                &static_keys.cipher_key()?,
-                &static_keys.mac_key()?,
+                static_keys.cipher_key()?,
+                static_keys.mac_key()?,
             )?;
 
             let usmc = UnidentifiedSenderMessageContent::deserialize(&message_bytes)?;
@@ -1089,13 +1089,13 @@ pub async fn sealed_sender_decrypt_to_usmc(
             }
 
             let mut message_bytes = encrypted_message.into_vec();
-            let result = Aes256GcmSiv::new(&keys.k).and_then(|aes_gcm_siv| {
-                aes_gcm_siv.decrypt_with_appended_tag(
-                    &mut message_bytes,
+            let result = Aes256GcmSiv::new_from_slice(&keys.k).and_then(|aes_gcm_siv| {
+                aes_gcm_siv.decrypt_in_place(
                     // There's no nonce because the key is already one-use.
-                    &[0; Aes256GcmSiv::NONCE_SIZE],
+                    &aes_gcm_siv::Nonce::default(),
                     // And there's no associated data.
                     &[],
+                    &mut message_bytes,
                 )
             });
             if let Err(err) = result {
