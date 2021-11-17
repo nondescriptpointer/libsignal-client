@@ -3,16 +3,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 
+use prost::Message;
+
 use crate::ratchet::{ChainKey, MessageKeys, RootKey};
-use crate::{IdentityKey, KeyPair, PrivateKey, PublicKey, Result, SignalProtocolError, HKDF};
+use crate::{IdentityKey, KeyPair, PrivateKey, PublicKey, Result, SignalProtocolError};
 
 use crate::consts;
 use crate::proto::storage::session_structure;
 use crate::proto::storage::{RecordStructure, SessionStructure};
 use crate::state::{PreKeyId, SignedPreKeyId};
-use prost::Message;
-
-use std::collections::VecDeque;
 
 #[derive(Debug, Clone)]
 pub(crate) struct UnacknowledgedPreKeyMessageItems {
@@ -119,8 +118,7 @@ impl SessionState {
         if self.session.root_key.len() != 32 {
             return Err(SignalProtocolError::InvalidProtobufEncoding);
         }
-        let hkdf = HKDF::new(self.session_version()?)?;
-        RootKey::new(hkdf, &self.session.root_key)
+        RootKey::new(&self.session.root_key)
     }
 
     pub(crate) fn set_root_key(&mut self, root_key: &RootKey) -> Result<()> {
@@ -195,8 +193,7 @@ impl SessionState {
                     if c.key.len() != 32 {
                         return Err(SignalProtocolError::InvalidProtobufEncoding);
                     }
-                    let hkdf = HKDF::new(self.session_version()?)?;
-                    Ok(Some(ChainKey::new(hkdf, &c.key, c.index)?))
+                    Ok(Some(ChainKey::new(&c.key, c.index)?))
                 }
             },
         }
@@ -265,8 +262,7 @@ impl SessionState {
             SignalProtocolError::InvalidState("get_sender_chain_key", "No chain key".to_owned())
         })?;
 
-        let hkdf = HKDF::new(self.session_version()?)?;
-        ChainKey::new(hkdf, &chain_key.key, chain_key.index)
+        ChainKey::new(&chain_key.key, chain_key.index)
     }
 
     pub(crate) fn get_sender_chain_key_bytes(&self) -> Result<Vec<u8>> {
@@ -458,35 +454,30 @@ impl From<&SessionState> for SessionStructure {
 #[derive(Clone, Debug)]
 pub struct SessionRecord {
     current_session: Option<SessionState>,
-    previous_sessions: VecDeque<SessionState>,
+    previous_sessions: Vec<Vec<u8>>,
 }
 
 impl SessionRecord {
     pub fn new_fresh() -> Self {
         Self {
             current_session: None,
-            previous_sessions: VecDeque::new(),
+            previous_sessions: Vec::new(),
         }
     }
 
     pub(crate) fn new(state: SessionState) -> Self {
         Self {
             current_session: Some(state),
-            previous_sessions: VecDeque::new(),
+            previous_sessions: Vec::new(),
         }
     }
 
     pub fn deserialize(bytes: &[u8]) -> Result<Self> {
         let record = RecordStructure::decode(bytes)?;
 
-        let mut previous = VecDeque::with_capacity(record.previous_sessions.len());
-        for s in record.previous_sessions {
-            previous.push_back(s.into());
-        }
-
         Ok(Self {
             current_session: record.current_session.map(|s| s.into()),
-            previous_sessions: previous,
+            previous_sessions: record.previous_sessions,
         })
     }
 
@@ -494,7 +485,7 @@ impl SessionRecord {
         let session = SessionState::new(SessionStructure::decode(bytes)?);
         Ok(Self {
             current_session: Some(session),
-            previous_sessions: VecDeque::new(),
+            previous_sessions: Vec::new(),
         })
     }
 
@@ -507,7 +498,8 @@ impl SessionRecord {
             }
         }
 
-        for previous in &self.previous_sessions {
+        for previous in self.previous_session_states() {
+            let previous = previous?;
             if previous.session_version()? == version
                 && alice_base_key == previous.alice_base_key()?
             {
@@ -549,8 +541,12 @@ impl SessionRecord {
         Ok(())
     }
 
-    pub(crate) fn previous_session_states(&self) -> Result<impl Iterator<Item = &SessionState>> {
-        Ok(self.previous_sessions.iter())
+    pub(crate) fn previous_session_states(
+        &self,
+    ) -> impl ExactSizeIterator<Item = Result<SessionState>> + '_ {
+        self.previous_sessions
+            .iter()
+            .map(|bytes| Ok(SessionStructure::decode(&bytes[..])?.into()))
     }
 
     pub(crate) fn promote_old_session(
@@ -558,9 +554,13 @@ impl SessionRecord {
         old_session: usize,
         updated_session: SessionState,
     ) -> Result<()> {
-        self.previous_sessions.remove(old_session).ok_or_else(|| {
-            SignalProtocolError::InvalidState("promote_old_session", "out of range".into())
-        })?;
+        if old_session >= self.previous_sessions.len() {
+            return Err(SignalProtocolError::InvalidState(
+                "promote_old_session",
+                "out of range".into(),
+            ));
+        }
+        self.previous_sessions.remove(old_session);
         self.promote_state(updated_session)
     }
 
@@ -571,12 +571,12 @@ impl SessionRecord {
     }
 
     pub fn archive_current_state(&mut self) -> Result<()> {
-        if self.current_session.is_some() {
-            self.previous_sessions
-                .push_front(self.current_session.take().expect("Checked is_some"));
-            if self.previous_sessions.len() > consts::ARCHIVED_STATES_MAX_LENGTH {
-                self.previous_sessions.pop_back();
+        if let Some(current_session) = self.current_session.take() {
+            if self.previous_sessions.len() >= consts::ARCHIVED_STATES_MAX_LENGTH {
+                self.previous_sessions.pop();
             }
+            self.previous_sessions
+                .insert(0, current_session.session.encode_to_vec());
         } else {
             log::info!("Skipping archive, current session state is fresh",);
         }
@@ -585,14 +585,11 @@ impl SessionRecord {
     }
 
     pub fn serialize(&self) -> Result<Vec<u8>> {
-        let mut buf = vec![];
-
         let record = RecordStructure {
             current_session: self.current_session.as_ref().map(|s| s.into()),
-            previous_sessions: self.previous_sessions.iter().map(|s| s.into()).collect(),
+            previous_sessions: self.previous_sessions.clone(),
         };
-        record.encode(&mut buf)?;
-        Ok(buf)
+        Ok(record.encode_to_vec())
     }
 
     pub fn remote_registration_id(&self) -> Result<u32> {

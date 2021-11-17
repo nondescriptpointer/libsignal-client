@@ -17,8 +17,6 @@ pub use error::*;
 mod storage;
 pub use storage::*;
 
-pub use crate::support::expect_ready;
-
 pub fn run_ffi_safe<F: FnOnce() -> Result<(), SignalFfiError> + std::panic::UnwindSafe>(
     f: F,
 ) -> *mut SignalFfiError {
@@ -31,25 +29,6 @@ pub fn run_ffi_safe<F: FnOnce() -> Result<(), SignalFfiError> + std::panic::Unwi
     match result {
         Ok(()) => std::ptr::null_mut(),
         Err(e) => Box::into_raw(Box::new(e)),
-    }
-}
-
-pub unsafe fn box_object<T>(
-    p: *mut *mut T,
-    obj: Result<T, SignalProtocolError>,
-) -> Result<(), SignalFfiError> {
-    if p.is_null() {
-        return Err(SignalFfiError::NullPointer);
-    }
-    match obj {
-        Ok(o) => {
-            *p = Box::into_raw(Box::new(o));
-            Ok(())
-        }
-        Err(e) => {
-            *p = std::ptr::null_mut();
-            Err(SignalFfiError::Signal(e))
-        }
     }
 }
 
@@ -121,35 +100,6 @@ macro_rules! ffi_bridge_destroy {
                     Ok(())
                 })
             }
-        }
-    };
-}
-
-/// Implementation of [`bridge_deserialize`](crate::support::bridge_deserialize) for FFI.
-macro_rules! ffi_bridge_deserialize {
-    ( $typ:ident::$fn:path as false ) => {};
-    ( $typ:ident::$fn:path as $ffi_name:ident ) => {
-        paste! {
-            #[cfg(feature = "ffi")]
-            #[no_mangle]
-            pub unsafe extern "C" fn [<signal_ $ffi_name _deserialize>](
-                p: *mut *mut $typ,
-                data: *const libc::c_uchar,
-                data_len: libc::size_t,
-            ) -> *mut ffi::SignalFfiError {
-                ffi::run_ffi_safe(|| {
-                    if data.is_null() {
-                        return Err(ffi::SignalFfiError::NullPointer);
-                    }
-                    let data = std::slice::from_raw_parts(data, data_len);
-                    ffi::write_result_to(p, $typ::$fn(data))
-                })
-            }
-        }
-    };
-    ( $typ:ident::$fn:path ) => {
-        paste! {
-            ffi_bridge_deserialize!($typ::$fn as [<$typ:snake>]);
         }
     };
 }

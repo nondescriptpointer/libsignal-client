@@ -51,6 +51,12 @@ impl From<PublicKey> for IdentityKey {
     }
 }
 
+impl From<IdentityKey> for PublicKey {
+    fn from(value: IdentityKey) -> Self {
+        value.public_key
+    }
+}
+
 #[derive(Copy, Clone)]
 pub struct IdentityKeyPair {
     identity_key: IdentityKey,
@@ -94,11 +100,8 @@ impl IdentityKeyPair {
             public_key: self.identity_key.serialize().to_vec(),
             private_key: self.private_key.serialize().to_vec(),
         };
-        let mut result = Vec::new();
 
-        // prost documents the only possible encoding error is if there is insufficient
-        // space, which is not a problem when it is allowed to encode into a Vec
-        structure.encode(&mut result).expect("No encoding error");
+        let result = structure.encode_to_vec();
         result.into_boxed_slice()
     }
 }
@@ -130,6 +133,12 @@ impl From<KeyPair> for IdentityKeyPair {
             identity_key: value.public_key.into(),
             private_key: value.private_key,
         }
+    }
+}
+
+impl From<IdentityKeyPair> for KeyPair {
+    fn from(value: IdentityKeyPair) -> Self {
+        Self::new(value.identity_key.into(), value.private_key)
     }
 }
 

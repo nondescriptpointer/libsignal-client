@@ -9,10 +9,12 @@ use jni::objects::{JThrowable, JValue};
 use jni::sys::jobject;
 
 use device_transfer::Error as DeviceTransferError;
+use hsm_enclave::Error as HsmEnclaveError;
 use libsignal_protocol::*;
 use signal_crypto::Error as SignalCryptoError;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
+use zkgroup::ZkGroupError;
 
 pub(crate) use jni::objects::{AutoArray, JClass, JObject, JString, ReleaseMode};
 pub(crate) use jni::sys::{jboolean, jbyteArray, jint, jlong, jlongArray, jstring};
@@ -64,11 +66,10 @@ pub use error::*;
 mod storage;
 pub use storage::*;
 
-pub use crate::support::expect_ready;
-
 /// The type of boxed Rust values, as surfaced in JavaScript.
 pub type ObjectHandle = jlong;
 
+pub type JavaObject<'a> = JObject<'a>;
 pub type JavaUUID<'a> = JObject<'a>;
 pub type JavaReturnUUID = jobject;
 pub type JavaCiphertextMessage<'a> = JObject<'a>;
@@ -110,6 +111,34 @@ fn throw_error(env: &JNIEnv, error: SignalJniError) {
             );
             if let Err(e) = result {
                 log::error!("failed to throw exception for {}: {}", error, e);
+            }
+            return;
+        }
+
+        SignalJniError::Signal(SignalProtocolError::InvalidRegistrationId(ref addr, _value)) => {
+            let throwable = protocol_address_to_jobject(env, addr)
+                .and_then(|addr_object| Ok((addr_object, env.new_string(error.to_string())?)))
+                .and_then(|(addr_object, message)| {
+                    Ok(env.new_object(
+                        "org/whispersystems/libsignal/InvalidRegistrationIdException",
+                        jni_signature!(
+                            (
+                                org.whispersystems.libsignal.SignalProtocolAddress,
+                                java.lang.String,
+                            ) -> void
+                        ),
+                        &[JValue::from(addr_object), JValue::from(message)],
+                    )?)
+                });
+
+            match throwable {
+                Err(e) => log::error!("failed to create exception for {}: {}", error, e),
+                Ok(throwable) => {
+                    let result = env.throw(JThrowable::from(throwable));
+                    if let Err(e) = result {
+                        log::error!("failed to throw exception for {}: {}", error, e);
+                    }
+                }
             }
             return;
         }
@@ -192,9 +221,8 @@ fn throw_error(env: &JNIEnv, error: SignalJniError) {
         SignalJniError::Signal(SignalProtocolError::InvalidArgument(_))
         | SignalJniError::SignalCrypto(SignalCryptoError::UnknownAlgorithm(_, _))
         | SignalJniError::SignalCrypto(SignalCryptoError::InvalidInputSize)
-        | SignalJniError::SignalCrypto(SignalCryptoError::InvalidNonceSize) => {
-            "java/lang/IllegalArgumentException"
-        }
+        | SignalJniError::SignalCrypto(SignalCryptoError::InvalidNonceSize)
+        | SignalJniError::DeserializationFailed(_) => "java/lang/IllegalArgumentException",
 
         SignalJniError::IntegerOverflow(_)
         | SignalJniError::Jni(_)
@@ -260,11 +288,36 @@ fn throw_error(env: &JNIEnv, error: SignalJniError) {
         SignalJniError::Signal(SignalProtocolError::SealedSenderSelfSend)
         | SignalJniError::Signal(SignalProtocolError::UntrustedIdentity(_))
         | SignalJniError::Signal(SignalProtocolError::FingerprintVersionMismatch(_, _))
+        | SignalJniError::Signal(SignalProtocolError::InvalidRegistrationId(..))
         | SignalJniError::UnexpectedPanic(_)
         | SignalJniError::BadJniParameter(_)
         | SignalJniError::UnexpectedJniResultType(_, _) => {
             unreachable!("already handled in prior match")
         }
+
+        SignalJniError::HsmEnclave(HsmEnclaveError::HSMCommunicationError(_)) => {
+            "org/signal/libsignal/hsmenclave/EnclaveCommunicationFailureException"
+        }
+        SignalJniError::HsmEnclave(HsmEnclaveError::TrustedCodeError) => {
+            "org/signal/libsignal/hsmenclave/TrustedCodeMismatchException"
+        }
+        SignalJniError::HsmEnclave(HsmEnclaveError::InvalidPublicKeyError)
+        | SignalJniError::HsmEnclave(HsmEnclaveError::InvalidCodeHashError) => {
+            "java/lang/IllegalArgumentException"
+        }
+        SignalJniError::HsmEnclave(HsmEnclaveError::InvalidBridgeStateError) => {
+            "java/lang/IllegalStateException"
+        }
+
+        SignalJniError::ZkGroup(ZkGroupError::BadArgs) => {
+            "org/signal/zkgroup/InvalidInputException"
+        }
+        SignalJniError::ZkGroup(
+            ZkGroupError::DecryptionFailure
+            | ZkGroupError::MacVerificationFailure
+            | ZkGroupError::ProofVerificationFailure
+            | ZkGroupError::SignatureVerificationFailure,
+        ) => "org/signal/zkgroup/VerificationFailedException",
     };
 
     if let Err(e) = env.throw_new(exception_type, error.to_string()) {
@@ -325,13 +378,6 @@ where
     }
 }
 
-pub fn box_object<T>(t: Result<T, SignalProtocolError>) -> Result<ObjectHandle, SignalJniError> {
-    match t {
-        Ok(t) => Ok(Box::into_raw(Box::new(t)) as ObjectHandle),
-        Err(e) => Err(SignalJniError::Signal(e)),
-    }
-}
-
 pub unsafe fn native_handle_cast<T>(
     handle: ObjectHandle,
 ) -> Result<&'static mut T, SignalJniError> {
@@ -347,34 +393,37 @@ pub unsafe fn native_handle_cast<T>(
     Ok(&mut *(handle as *mut T))
 }
 
-pub fn jint_to_u32(v: jint) -> Result<u32, SignalJniError> {
-    if v < 0 {
-        return Err(SignalJniError::IntegerOverflow(format!("{} to u32", v)));
+/// Calls a passed in function with a local frame of capacity that's passed in. Basically just
+/// the jni with_local_frame except with the result type changed to use SignalJniError instead.
+pub fn with_local_frame<'a, F>(env: &'a JNIEnv, capacity: i32, f: F) -> SignalJniResult<JObject<'a>>
+where
+    F: FnOnce() -> SignalJniResult<JObject<'a>>,
+{
+    env.push_local_frame(capacity)?;
+    let res = f();
+    match res {
+        Ok(obj) => Ok(env.pop_local_frame(obj)?),
+        Err(e) => {
+            env.pop_local_frame(JObject::null())?;
+            Err(e)
+        }
     }
-    Ok(v as u32)
 }
 
-pub fn jint_to_u8(v: jint) -> Result<u8, SignalJniError> {
-    match u8::try_from(v) {
-        Err(_) => Err(SignalJniError::IntegerOverflow(format!("{} to u8", v))),
-        Ok(v) => Ok(v),
-    }
-}
-
-pub fn jlong_to_u64(v: jlong) -> Result<u64, SignalJniError> {
-    if v < 0 {
-        return Err(SignalJniError::IntegerOverflow(format!("{} to u64", v)));
-    }
-    Ok(v as u64)
-}
-
-pub fn to_jbytearray<T: AsRef<[u8]>>(
+/// Calls a passed in function with a local frame of capacity that's passed in. Basically just
+/// the jni with_local_frame except with the result type changed to use SignalJniError instead.
+pub fn with_local_frame_no_jobject_result<F, T>(
     env: &JNIEnv,
-    data: Result<T, SignalProtocolError>,
-) -> Result<jbyteArray, SignalJniError> {
-    let data = data?;
-    let data: &[u8] = data.as_ref();
-    Ok(env.byte_array_from_slice(data)?)
+    capacity: i32,
+    f: F,
+) -> SignalJniResult<T>
+where
+    F: FnOnce() -> SignalJniResult<T>,
+{
+    env.push_local_frame(capacity)?;
+    let res = f();
+    env.pop_local_frame(JObject::null())?;
+    res
 }
 
 /// Calls a method and translates any thrown exceptions to
@@ -435,8 +484,24 @@ pub fn jobject_from_serialized<'a>(
 ) -> Result<JObject<'a>, SignalJniError> {
     let class_type = env.find_class(class_name)?;
     let ctor_sig = jni_signature!(([byte]) -> void);
-    let ctor_args = [JValue::from(to_jbytearray(env, Ok(serialized))?)];
+    let ctor_args = [JValue::from(env.byte_array_from_slice(serialized)?)];
     Ok(env.new_object(class_type, ctor_sig, &ctor_args)?)
+}
+
+/// Constructs a Java SignalProtocolAddress from a ProtocolAddress value.
+fn protocol_address_to_jobject<'a>(
+    env: &'a JNIEnv,
+    address: &ProtocolAddress,
+) -> Result<JObject<'a>, SignalJniError> {
+    let address_class = env.find_class("org/whispersystems/libsignal/SignalProtocolAddress")?;
+    let address_ctor_args = [
+        JObject::from(env.new_string(address.name())?).into(),
+        JValue::from(address.device_id().convert_into(env)?),
+    ];
+
+    let address_ctor_sig = jni_signature!((java.lang.String, int) -> void);
+    let address_jobject = env.new_object(address_class, address_ctor_sig, &address_ctor_args)?;
+    Ok(address_jobject)
 }
 
 /// Verifies that a Java object is a non-`null` instance of the given class.
@@ -469,20 +534,28 @@ pub fn get_object_with_native_handle<T: 'static + Clone>(
     callback_sig: &'static str,
     callback_fn: &'static str,
 ) -> Result<Option<T>, SignalJniError> {
-    let obj: JObject =
-        call_method_checked(env, store_obj, callback_fn, callback_sig, callback_args)?;
-    if obj.is_null() {
-        return Ok(None);
-    }
+    with_local_frame_no_jobject_result(env, 64, || -> SignalJniResult<Option<T>> {
+        let obj = call_method_checked::<_, JObject>(
+            env,
+            store_obj,
+            callback_fn,
+            callback_sig,
+            callback_args,
+        )?;
+        if obj.is_null() {
+            return Ok(None);
+        }
 
-    let handle: jlong =
-        call_method_checked(env, obj, "nativeHandle", jni_signature!(() -> long), &[])?;
-    if handle == 0 {
-        return Ok(None);
-    }
+        let handle: jlong = env
+            .get_field(obj, "unsafeHandle", jni_signature!(long))?
+            .try_into()?;
+        if handle == 0 {
+            return Ok(None);
+        }
 
-    let object = unsafe { native_handle_cast::<T>(handle)? };
-    Ok(Some(object.clone()))
+        let object = unsafe { native_handle_cast::<T>(handle)? };
+        Ok(Some(object.clone()))
+    })
 }
 
 /// Calls a method, then serializes the result.
@@ -495,17 +568,29 @@ pub fn get_object_with_serialization(
     callback_sig: &'static str,
     callback_fn: &'static str,
 ) -> Result<Option<Vec<u8>>, SignalJniError> {
-    let obj: JObject =
-        call_method_checked(env, store_obj, callback_fn, callback_sig, callback_args)?;
+    with_local_frame_no_jobject_result(env, 64, || -> SignalJniResult<Option<Vec<u8>>> {
+        let obj = call_method_checked::<_, JObject>(
+            env,
+            store_obj,
+            callback_fn,
+            callback_sig,
+            callback_args,
+        )?;
 
-    if obj.is_null() {
-        return Ok(None);
-    }
+        if obj.is_null() {
+            return Ok(None);
+        }
 
-    let bytes: JObject =
-        call_method_checked(env, obj, "serialize", jni_signature!(() -> [byte]), &[])?;
+        let bytes = call_method_checked::<_, JObject>(
+            env,
+            obj,
+            "serialize",
+            jni_signature!(() -> [byte]),
+            &[],
+        )?;
 
-    Ok(Some(env.convert_byte_array(*bytes)?))
+        Ok(Some(env.convert_byte_array(*bytes)?))
+    })
 }
 
 /// Like [CiphertextMessage], but non-owning.
@@ -557,28 +642,5 @@ macro_rules! jni_bridge_destroy {
                 }
             }
         }
-    };
-}
-
-/// Implementation of [`bridge_deserialize`](crate::support::bridge_deserialize) for JNI.
-macro_rules! jni_bridge_deserialize {
-    ( $typ:ident::$fn:path as false ) => {};
-    ( $typ:ident::$fn:path as $jni_name:ident ) => {
-        paste! {
-            #[no_mangle]
-            pub unsafe extern "C" fn [<Java_org_signal_client_internal_Native_ $jni_name _1Deserialize>](
-                env: jni::JNIEnv,
-                _class: jni::JClass,
-                data: jni::jbyteArray,
-            ) -> jni::ObjectHandle {
-                jni::run_ffi_safe(&env, || {
-                    let data = env.convert_byte_array(data)?;
-                    jni::ResultTypeInfo::convert_into($typ::$fn(data.as_ref()), &env)
-                })
-            }
-        }
-    };
-    ( $typ:ident::$fn:path ) => {
-        jni_bridge_deserialize!($typ::$fn as $typ);
     };
 }

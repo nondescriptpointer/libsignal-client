@@ -6,11 +6,13 @@
 #![allow(clippy::missing_safety_doc)]
 #![warn(clippy::unwrap_used)]
 
+use futures_util::FutureExt;
 use libc::{c_char, c_uchar, c_uint, size_t};
 use libsignal_bridge::ffi::*;
 use libsignal_protocol::*;
 use std::convert::TryFrom;
 use std::ffi::{c_void, CString};
+use std::panic::AssertUnwindSafe;
 
 pub mod logging;
 mod util;
@@ -58,6 +60,31 @@ pub unsafe extern "C" fn signal_error_get_message(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn signal_error_get_address(
+    err: *const SignalFfiError,
+    out: *mut *mut ProtocolAddress,
+) -> *mut SignalFfiError {
+    let err = AssertUnwindSafe(err);
+    run_ffi_safe(|| {
+        let err = err.as_ref().ok_or(SignalFfiError::NullPointer)?;
+        match err {
+            SignalFfiError::Signal(SignalProtocolError::InvalidRegistrationId(addr, _value)) => {
+                write_result_to(out, addr.clone())?;
+            }
+            _ => {
+                return Err(SignalFfiError::Signal(
+                    SignalProtocolError::InvalidArgument(format!(
+                        "cannot get address from error ({})",
+                        err
+                    )),
+                ));
+            }
+        }
+        Ok(())
+    })
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn signal_error_get_type(err: *const SignalFfiError) -> u32 {
     match err.as_ref() {
         Some(err) => {
@@ -85,8 +112,9 @@ pub unsafe extern "C" fn signal_identitykeypair_deserialize(
     run_ffi_safe(|| {
         let input = as_slice(input, input_len)?;
         let identity_key_pair = IdentityKeyPair::try_from(input)?;
-        box_object::<PublicKey>(public_key, Ok(*identity_key_pair.public_key()))?;
-        box_object::<PrivateKey>(private_key, Ok(*identity_key_pair.private_key()))
+        write_result_to(public_key, *identity_key_pair.public_key())?;
+        write_result_to(private_key, *identity_key_pair.private_key())?;
+        Ok(())
     })
 }
 
@@ -123,7 +151,7 @@ pub unsafe extern "C" fn signal_sealed_session_cipher_decrypt(
         let local_e164 = Option::convert_from(local_e164)?;
         let local_uuid = Option::convert_from(local_uuid)?.ok_or(SignalFfiError::NullPointer)?;
 
-        let decrypted = expect_ready(sealed_sender_decrypt(
+        let decrypted = sealed_sender_decrypt(
             ctext,
             trust_root,
             timestamp,
@@ -135,7 +163,9 @@ pub unsafe extern "C" fn signal_sealed_session_cipher_decrypt(
             &mut prekey_store,
             &mut signed_prekey_store,
             Some(ctx),
-        ))?;
+        )
+        .now_or_never()
+        .expect("synchronous")?;
 
         write_optional_cstr_to(sender_e164, Ok(decrypted.sender_e164))?;
         write_cstr_to(sender_uuid, Ok(decrypted.sender_uuid))?;

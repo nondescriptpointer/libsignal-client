@@ -1,5 +1,5 @@
 //
-// Copyright 2020 Signal Messenger, LLC.
+// Copyright 2020-2021 Signal Messenger, LLC.
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 
@@ -47,7 +47,7 @@ impl TryFrom<u8> for KeyType {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum PublicKeyData {
-    DjbPublicKey([u8; 32]),
+    DjbPublicKey([u8; curve25519::PUBLIC_KEY_LENGTH]),
 }
 
 #[derive(Clone, Copy, Eq)]
@@ -68,11 +68,11 @@ impl PublicKey {
         match key_type {
             KeyType::Djb => {
                 // We allow trailing data after the public key (why?)
-                if value.len() < 32 + 1 {
+                if value.len() < curve25519::PUBLIC_KEY_LENGTH + 1 {
                     return Err(SignalProtocolError::BadKeyLength(KeyType::Djb, value.len()));
                 }
-                let mut key = [0u8; 32];
-                key.copy_from_slice(&value[1..33]);
+                let mut key = [0u8; curve25519::PUBLIC_KEY_LENGTH];
+                key.copy_from_slice(&value[1..][..curve25519::PUBLIC_KEY_LENGTH]);
                 Ok(PublicKey {
                     key: PublicKeyData::DjbPublicKey(key),
                 })
@@ -87,7 +87,7 @@ impl PublicKey {
     }
 
     pub fn from_djb_public_key_bytes(bytes: &[u8]) -> Result<Self> {
-        match <[u8; 32]>::try_from(bytes) {
+        match <[u8; curve25519::PUBLIC_KEY_LENGTH]>::try_from(bytes) {
             Err(_) => Err(SignalProtocolError::BadKeyLength(KeyType::Djb, bytes.len())),
             Ok(key) => Ok(PublicKey {
                 key: PublicKeyData::DjbPublicKey(key),
@@ -110,13 +110,13 @@ impl PublicKey {
     pub fn verify_signature(&self, message: &[u8], signature: &[u8]) -> Result<bool> {
         match self.key {
             PublicKeyData::DjbPublicKey(pub_key) => {
-                if signature.len() != 64 {
+                if signature.len() != curve25519::SIGNATURE_LENGTH {
                     return Ok(false);
                 }
-                Ok(curve25519::KeyPair::verify_signature(
+                Ok(curve25519::PrivateKey::verify_signature(
                     &pub_key,
                     message,
-                    array_ref![signature, 0, 64],
+                    array_ref![signature, 0, curve25519::SIGNATURE_LENGTH],
                 ))
             }
         }
@@ -197,7 +197,7 @@ impl fmt::Debug for PublicKey {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum PrivateKeyData {
-    DjbPrivateKey([u8; 32]),
+    DjbPrivateKey([u8; curve25519::PRIVATE_KEY_LENGTH]),
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -207,11 +207,11 @@ pub struct PrivateKey {
 
 impl PrivateKey {
     pub fn deserialize(value: &[u8]) -> Result<Self> {
-        if value.len() != 32 {
+        if value.len() != curve25519::PRIVATE_KEY_LENGTH {
             Err(SignalProtocolError::BadKeyLength(KeyType::Djb, value.len()))
         } else {
-            let mut key = [0u8; 32];
-            key.copy_from_slice(&value[..32]);
+            let mut key = [0u8; curve25519::PRIVATE_KEY_LENGTH];
+            key.copy_from_slice(&value[..curve25519::PRIVATE_KEY_LENGTH]);
             // Clamp:
             key[0] &= 0xF8;
             key[31] &= 0x7F;
@@ -231,7 +231,8 @@ impl PrivateKey {
     pub fn public_key(&self) -> Result<PublicKey> {
         match self.key {
             PrivateKeyData::DjbPrivateKey(private_key) => {
-                let public_key = curve25519::derive_public_key(&private_key);
+                let public_key =
+                    curve25519::PrivateKey::from(private_key).derive_public_key_bytes();
                 Ok(PublicKey::new(PublicKeyData::DjbPublicKey(public_key)))
             }
         }
@@ -250,8 +251,8 @@ impl PrivateKey {
     ) -> Result<Box<[u8]>> {
         match self.key {
             PrivateKeyData::DjbPrivateKey(k) => {
-                let kp = curve25519::KeyPair::from(k);
-                Ok(Box::new(kp.calculate_signature(csprng, message)))
+                let private_key = curve25519::PrivateKey::from(k);
+                Ok(Box::new(private_key.calculate_signature(csprng, message)))
             }
         }
     }
@@ -259,8 +260,8 @@ impl PrivateKey {
     pub fn calculate_agreement(&self, their_key: &PublicKey) -> Result<Box<[u8]>> {
         match (self.key, their_key.key) {
             (PrivateKeyData::DjbPrivateKey(priv_key), PublicKeyData::DjbPublicKey(pub_key)) => {
-                let kp = curve25519::KeyPair::from(priv_key);
-                Ok(Box::new(kp.calculate_agreement(&pub_key)))
+                let private_key = curve25519::PrivateKey::from(priv_key);
+                Ok(Box::new(private_key.calculate_agreement(&pub_key)))
             }
         }
     }
@@ -288,10 +289,14 @@ pub struct KeyPair {
 
 impl KeyPair {
     pub fn generate<R: Rng + CryptoRng>(csprng: &mut R) -> Self {
-        let keypair = curve25519::KeyPair::new(csprng);
+        let private_key = curve25519::PrivateKey::new(csprng);
 
-        let public_key = PublicKey::from(PublicKeyData::DjbPublicKey(*keypair.public_key()));
-        let private_key = PrivateKey::from(PrivateKeyData::DjbPrivateKey(*keypair.private_key()));
+        let public_key = PublicKey::from(PublicKeyData::DjbPublicKey(
+            private_key.derive_public_key_bytes(),
+        ));
+        let private_key = PrivateKey::from(PrivateKeyData::DjbPrivateKey(
+            private_key.private_key_bytes(),
+        ));
 
         Self {
             public_key,
@@ -325,6 +330,15 @@ impl KeyPair {
 
     pub fn calculate_agreement(&self, their_key: &PublicKey) -> Result<Box<[u8]>> {
         self.private_key.calculate_agreement(their_key)
+    }
+}
+
+impl TryFrom<PrivateKey> for KeyPair {
+    type Error = SignalProtocolError;
+
+    fn try_from(value: PrivateKey) -> Result<Self> {
+        let public_key = value.public_key()?;
+        Ok(Self::new(public_key, value))
     }
 }
 
