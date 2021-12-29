@@ -37,8 +37,8 @@ mod sealed_sender;
 mod sender_keys;
 mod session;
 mod session_cipher;
-mod state;
-mod storage;
+pub mod state;
+pub mod storage;
 mod utils;
 
 use error::Result;
