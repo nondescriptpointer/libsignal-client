@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 
+use std::convert::TryInto;
+
 use prost::Message;
 
 use crate::ratchet::{ChainKey, MessageKeys, RootKey};
@@ -115,10 +117,10 @@ impl SessionState {
     }
 
     pub(crate) fn root_key(&self) -> Result<RootKey> {
-        if self.session.root_key.len() != 32 {
-            return Err(SignalProtocolError::InvalidProtobufEncoding);
-        }
-        RootKey::new(&self.session.root_key)
+        let root_key_bytes = self.session.root_key[..]
+            .try_into()
+            .map_err(|_| SignalProtocolError::InvalidProtobufEncoding)?;
+        Ok(RootKey::new(root_key_bytes))
     }
 
     pub(crate) fn set_root_key(&mut self, root_key: &RootKey) -> Result<()> {
@@ -190,10 +192,10 @@ impl SessionState {
             Some((chain, _)) => match chain.chain_key {
                 None => Err(SignalProtocolError::InvalidProtobufEncoding),
                 Some(c) => {
-                    if c.key.len() != 32 {
-                        return Err(SignalProtocolError::InvalidProtobufEncoding);
-                    }
-                    Ok(Some(ChainKey::new(&c.key, c.index)?))
+                    let chain_key_bytes = c.key[..]
+                        .try_into()
+                        .map_err(|_| SignalProtocolError::InvalidProtobufEncoding)?;
+                    Ok(Some(ChainKey::new(chain_key_bytes, c.index)))
                 }
             },
         }
@@ -214,6 +216,7 @@ impl SessionState {
             sender_ratchet_key_private: vec![],
             chain_key: Some(chain_key),
             message_keys: vec![],
+            needs_pni_signature: false,
         };
 
         self.session.receiver_chains.push(chain);
@@ -246,6 +249,7 @@ impl SessionState {
             sender_ratchet_key_private: sender.private_key.serialize().to_vec(),
             chain_key: Some(chain_key),
             message_keys: vec![],
+            needs_pni_signature: false,
         };
 
         self.session.sender_chain = Some(new_chain);
@@ -262,7 +266,11 @@ impl SessionState {
             SignalProtocolError::InvalidState("get_sender_chain_key", "No chain key".to_owned())
         })?;
 
-        ChainKey::new(&chain_key.key, chain_key.index)
+        let chain_key_bytes = chain_key.key[..]
+            .try_into()
+            .map_err(|_| SignalProtocolError::InvalidProtobufEncoding)?;
+
+        Ok(ChainKey::new(chain_key_bytes, chain_key.index))
     }
 
     pub(crate) fn get_sender_chain_key_bytes(&self) -> Result<Vec<u8>> {
@@ -283,6 +291,7 @@ impl SessionState {
                 sender_ratchet_key_private: vec![],
                 chain_key: Some(chain_key),
                 message_keys: vec![],
+                needs_pni_signature: false,
             },
             Some(mut c) => {
                 c.chain_key = Some(chain_key);
@@ -306,15 +315,24 @@ impl SessionState {
                 .message_keys
                 .iter()
                 .position(|m| m.index == counter);
+
             if let Some(position) = message_key_idx {
                 let message_key = chain_and_index.0.message_keys.remove(position);
 
-                let keys = MessageKeys::new(
-                    &message_key.cipher_key,
-                    &message_key.mac_key,
-                    &message_key.iv,
-                    counter,
-                )?;
+                let cipher_key_bytes = message_key
+                    .cipher_key
+                    .try_into()
+                    .map_err(|_| SignalProtocolError::InvalidSessionStructure)?;
+                let mac_key_bytes = message_key
+                    .mac_key
+                    .try_into()
+                    .map_err(|_| SignalProtocolError::InvalidSessionStructure)?;
+                let iv_bytes = message_key
+                    .iv
+                    .try_into()
+                    .map_err(|_| SignalProtocolError::InvalidSessionStructure)?;
+
+                let keys = MessageKeys::new(cipher_key_bytes, mac_key_bytes, iv_bytes, counter);
 
                 // Update with message key removed
                 self.session.receiver_chains[chain_and_index.1] = chain_and_index.0;
@@ -430,6 +448,24 @@ impl SessionState {
 
     pub(crate) fn local_registration_id(&self) -> Result<u32> {
         Ok(self.session.local_registration_id)
+    }
+
+    pub(crate) fn needs_pni_signature(&self) -> bool {
+        self.session
+            .sender_chain
+            .as_ref()
+            .map_or(false, |chain| chain.needs_pni_signature)
+    }
+
+    pub(crate) fn set_needs_pni_signature(&mut self, needs_pni_signature: bool) -> Result<()> {
+        let chain = &mut self.session.sender_chain.as_mut().ok_or_else(|| {
+            SignalProtocolError::InvalidState(
+                "set_needs_pni_signature",
+                "No sender chain".to_string(),
+            )
+        })?;
+        chain.needs_pni_signature = needs_pni_signature;
+        Ok(())
     }
 }
 
@@ -555,9 +591,8 @@ impl SessionRecord {
         updated_session: SessionState,
     ) -> Result<()> {
         if old_session >= self.previous_sessions.len() {
-            return Err(SignalProtocolError::InvalidState(
-                "promote_old_session",
-                "out of range".into(),
+            return Err(SignalProtocolError::InternalError(
+                "tried to promote an old session that no longer exists (index out of range)",
             ));
         }
         self.previous_sessions.remove(old_session);
@@ -617,6 +652,15 @@ impl SessionRecord {
             Some(session) => session.has_sender_chain(),
             None => Ok(false),
         }
+    }
+
+    pub fn needs_pni_signature(&self) -> Result<bool> {
+        Ok(self.session_state()?.needs_pni_signature())
+    }
+
+    pub fn set_needs_pni_signature(&mut self, needs_pni_signature: bool) -> Result<()> {
+        self.session_state_mut()?
+            .set_needs_pni_signature(needs_pni_signature)
     }
 
     pub fn alice_base_key(&self) -> Result<&[u8]> {

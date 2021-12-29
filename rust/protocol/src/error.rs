@@ -38,8 +38,6 @@ pub enum SignalProtocolError {
     /// unrecognized message version <{0}>
     UnrecognizedMessageVersion(u32),
 
-    /// fingerprint identifiers do not match
-    FingerprintIdentifierMismatch,
     /// fingerprint version number mismatch them {0} us {1}
     FingerprintVersionMismatch(u32, u32),
     /// fingerprint parsing error
@@ -63,15 +61,8 @@ pub enum SignalProtocolError {
     /// invalid signed prekey identifier
     InvalidSignedPreKeyId,
 
-    /// invalid root key length <{0}>
-    InvalidRootKeyLength(usize),
-    /// invalid chain key length <{0}>
-    InvalidChainKeyLength(usize),
-
     /// invalid MAC key length <{0}>
     InvalidMacKeyLength(usize),
-    /// invalid cipher key length <{0}> or nonce length <{1}>
-    InvalidCipherCryptographicParameters(usize, usize),
     /// invalid ciphertext message
     InvalidCiphertext,
 
