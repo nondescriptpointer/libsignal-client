@@ -101,12 +101,11 @@ impl Finalize for NodePreKeyStore {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl PreKeyStore for NodePreKeyStore {
     async fn get_pre_key(
         &self,
         pre_key_id: u32,
-        _ctx: libsignal_protocol::Context,
     ) -> Result<PreKeyRecord, SignalProtocolError> {
         self.do_get_pre_key(pre_key_id)
             .await
@@ -117,7 +116,6 @@ impl PreKeyStore for NodePreKeyStore {
         &mut self,
         pre_key_id: u32,
         record: &PreKeyRecord,
-        _ctx: libsignal_protocol::Context,
     ) -> Result<(), SignalProtocolError> {
         self.do_save_pre_key(pre_key_id, record.clone())
             .await
@@ -127,7 +125,6 @@ impl PreKeyStore for NodePreKeyStore {
     async fn remove_pre_key(
         &mut self,
         pre_key_id: u32,
-        _ctx: libsignal_protocol::Context,
     ) -> Result<(), SignalProtocolError> {
         self.do_remove_pre_key(pre_key_id)
             .await
@@ -211,12 +208,11 @@ impl Finalize for NodeSignedPreKeyStore {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl SignedPreKeyStore for NodeSignedPreKeyStore {
     async fn get_signed_pre_key(
         &self,
         signed_pre_key_id: u32,
-        _ctx: libsignal_protocol::Context,
     ) -> Result<SignedPreKeyRecord, SignalProtocolError> {
         self.do_get_signed_pre_key(signed_pre_key_id)
             .await
@@ -227,7 +223,6 @@ impl SignedPreKeyStore for NodeSignedPreKeyStore {
         &mut self,
         signed_pre_key_id: u32,
         record: &SignedPreKeyRecord,
-        _ctx: libsignal_protocol::Context,
     ) -> Result<(), SignalProtocolError> {
         self.do_save_signed_pre_key(signed_pre_key_id, record.clone())
             .await
@@ -317,12 +312,11 @@ impl Finalize for NodeSessionStore {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl SessionStore for NodeSessionStore {
     async fn load_session(
         &self,
         name: &ProtocolAddress,
-        _ctx: libsignal_protocol::Context,
     ) -> Result<Option<SessionRecord>, SignalProtocolError> {
         self.do_get_session(name.clone())
             .await
@@ -333,7 +327,6 @@ impl SessionStore for NodeSessionStore {
         &mut self,
         name: &ProtocolAddress,
         record: &SessionRecord,
-        _ctx: libsignal_protocol::Context,
     ) -> Result<(), SignalProtocolError> {
         self.do_save_session(name.clone(), record.clone())
             .await
@@ -499,11 +492,10 @@ impl Finalize for NodeIdentityKeyStore {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl IdentityKeyStore for NodeIdentityKeyStore {
     async fn get_identity_key_pair(
         &self,
-        _ctx: libsignal_protocol::Context,
     ) -> Result<IdentityKeyPair, SignalProtocolError> {
         let pk = self
             .do_get_identity_key()
@@ -515,7 +507,6 @@ impl IdentityKeyStore for NodeIdentityKeyStore {
 
     async fn get_local_registration_id(
         &self,
-        _ctx: libsignal_protocol::Context,
     ) -> Result<u32, SignalProtocolError> {
         self.do_get_local_registration_id()
             .await
@@ -525,7 +516,6 @@ impl IdentityKeyStore for NodeIdentityKeyStore {
     async fn get_identity(
         &self,
         address: &ProtocolAddress,
-        _ctx: libsignal_protocol::Context,
     ) -> Result<Option<IdentityKey>, SignalProtocolError> {
         Ok(self
             .do_get_identity(address.clone())
@@ -538,7 +528,6 @@ impl IdentityKeyStore for NodeIdentityKeyStore {
         &mut self,
         address: &ProtocolAddress,
         identity: &IdentityKey,
-        _ctx: libsignal_protocol::Context,
     ) -> Result<bool, SignalProtocolError> {
         self.do_save_identity(address.clone(), *identity.public_key())
             .await
@@ -550,7 +539,6 @@ impl IdentityKeyStore for NodeIdentityKeyStore {
         address: &ProtocolAddress,
         identity: &IdentityKey,
         direction: libsignal_protocol::Direction,
-        _ctx: libsignal_protocol::Context,
     ) -> Result<bool, SignalProtocolError> {
         self.do_is_trusted(address.clone(), *identity.public_key(), direction)
             .await
@@ -652,13 +640,12 @@ impl Finalize for NodeSenderKeyStore {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl SenderKeyStore for NodeSenderKeyStore {
     async fn load_sender_key(
         &mut self,
         sender: &ProtocolAddress,
         distribution_id: Uuid,
-        _ctx: libsignal_protocol::Context,
     ) -> Result<Option<SenderKeyRecord>, SignalProtocolError> {
         self.do_get_sender_key(sender.clone(), distribution_id)
             .await
@@ -670,7 +657,6 @@ impl SenderKeyStore for NodeSenderKeyStore {
         sender: &ProtocolAddress,
         distribution_id: Uuid,
         record: &SenderKeyRecord,
-        _ctx: libsignal_protocol::Context,
     ) -> Result<(), SignalProtocolError> {
         self.do_save_sender_key(sender.clone(), distribution_id, record.clone())
             .await

@@ -232,13 +232,6 @@ impl SimpleArgTypeInfo for Option<String> {
     }
 }
 
-impl SimpleArgTypeInfo for Context {
-    type ArgType = *mut c_void;
-    fn convert_from(foreign: *mut c_void) -> SignalFfiResult<Self> {
-        Ok(Some(foreign))
-    }
-}
-
 impl SimpleArgTypeInfo for uuid::Uuid {
     type ArgType = *const [u8; 16];
     fn convert_from(foreign: Self::ArgType) -> SignalFfiResult<Self> {

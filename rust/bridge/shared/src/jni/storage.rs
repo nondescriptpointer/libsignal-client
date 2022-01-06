@@ -150,24 +150,22 @@ impl<'a> JniIdentityKeyStore<'a> {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl<'a> IdentityKeyStore for JniIdentityKeyStore<'a> {
     async fn get_identity_key_pair(
-        &self,
-        _ctx: Context,
+        &self
     ) -> Result<IdentityKeyPair, SignalProtocolError> {
         Ok(self.do_get_identity_key_pair()?)
     }
 
-    async fn get_local_registration_id(&self, _ctx: Context) -> Result<u32, SignalProtocolError> {
+    async fn get_local_registration_id(&self) -> Result<u32, SignalProtocolError> {
         Ok(self.do_get_local_registration_id()?)
     }
 
     async fn save_identity(
         &mut self,
         address: &ProtocolAddress,
-        identity: &IdentityKey,
-        _ctx: Context,
+        identity: &IdentityKey
     ) -> Result<bool, SignalProtocolError> {
         Ok(self.do_save_identity(address, identity)?)
     }
@@ -176,16 +174,14 @@ impl<'a> IdentityKeyStore for JniIdentityKeyStore<'a> {
         &self,
         address: &ProtocolAddress,
         identity: &IdentityKey,
-        direction: Direction,
-        _ctx: Context,
+        direction: Direction
     ) -> Result<bool, SignalProtocolError> {
         Ok(self.do_is_trusted_identity(address, identity, direction)?)
     }
 
     async fn get_identity(
         &self,
-        address: &ProtocolAddress,
-        _ctx: Context,
+        address: &ProtocolAddress
     ) -> Result<Option<IdentityKey>, SignalProtocolError> {
         Ok(self.do_get_identity(address)?)
     }
@@ -249,12 +245,11 @@ impl<'a> JniPreKeyStore<'a> {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl<'a> PreKeyStore for JniPreKeyStore<'a> {
     async fn get_pre_key(
         &self,
         prekey_id: u32,
-        _ctx: Context,
     ) -> Result<PreKeyRecord, SignalProtocolError> {
         Ok(self.do_get_pre_key(prekey_id)?)
     }
@@ -263,7 +258,6 @@ impl<'a> PreKeyStore for JniPreKeyStore<'a> {
         &mut self,
         prekey_id: u32,
         record: &PreKeyRecord,
-        _ctx: Context,
     ) -> Result<(), SignalProtocolError> {
         Ok(self.do_save_pre_key(prekey_id, record)?)
     }
@@ -271,7 +265,6 @@ impl<'a> PreKeyStore for JniPreKeyStore<'a> {
     async fn remove_pre_key(
         &mut self,
         prekey_id: u32,
-        _ctx: Context,
     ) -> Result<(), SignalProtocolError> {
         Ok(self.do_remove_pre_key(prekey_id)?)
     }
@@ -327,12 +320,11 @@ impl<'a> JniSignedPreKeyStore<'a> {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl<'a> SignedPreKeyStore for JniSignedPreKeyStore<'a> {
     async fn get_signed_pre_key(
         &self,
         prekey_id: u32,
-        _ctx: Context,
     ) -> Result<SignedPreKeyRecord, SignalProtocolError> {
         Ok(self.do_get_signed_pre_key(prekey_id)?)
     }
@@ -341,7 +333,6 @@ impl<'a> SignedPreKeyStore for JniSignedPreKeyStore<'a> {
         &mut self,
         prekey_id: u32,
         record: &SignedPreKeyRecord,
-        _ctx: Context,
     ) -> Result<(), SignalProtocolError> {
         Ok(self.do_save_signed_pre_key(prekey_id, record)?)
     }
@@ -397,12 +388,11 @@ impl<'a> JniSessionStore<'a> {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl<'a> SessionStore for JniSessionStore<'a> {
     async fn load_session(
         &self,
         address: &ProtocolAddress,
-        _ctx: Context,
     ) -> Result<Option<SessionRecord>, SignalProtocolError> {
         Ok(self.do_load_session(address)?)
     }
@@ -411,7 +401,6 @@ impl<'a> SessionStore for JniSessionStore<'a> {
         &mut self,
         address: &ProtocolAddress,
         record: &SessionRecord,
-        _ctx: Context,
     ) -> Result<(), SignalProtocolError> {
         Ok(self.do_store_session(address, record)?)
     }
@@ -473,14 +462,13 @@ impl<'a> JniSenderKeyStore<'a> {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl<'a> SenderKeyStore for JniSenderKeyStore<'a> {
     async fn store_sender_key(
         &mut self,
         sender: &ProtocolAddress,
         distribution_id: Uuid,
         record: &SenderKeyRecord,
-        _ctx: Context,
     ) -> Result<(), SignalProtocolError> {
         Ok(self.do_store_sender_key(sender, distribution_id, record)?)
     }
@@ -489,7 +477,6 @@ impl<'a> SenderKeyStore for JniSenderKeyStore<'a> {
         &mut self,
         sender: &ProtocolAddress,
         distribution_id: Uuid,
-        _ctx: Context,
     ) -> Result<Option<SenderKeyRecord>, SignalProtocolError> {
         Ok(self.do_load_sender_key(sender, distribution_id)?)
     }

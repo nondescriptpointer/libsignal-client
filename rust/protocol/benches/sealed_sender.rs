@@ -33,7 +33,6 @@ pub fn v1(c: &mut Criterion) {
         &mut alice_store.identity_store,
         &bob_pre_key_bundle,
         &mut rng,
-        None,
     )
     .now_or_never()
     .expect("sync")
@@ -52,7 +51,7 @@ pub fn v1(c: &mut Criterion) {
         alice_address.name().to_string(),
         None,
         *alice_store
-            .get_identity_key_pair(None)
+            .get_identity_key_pair()
             .now_or_never()
             .expect("sync")
             .expect("valid")
@@ -80,7 +79,6 @@ pub fn v1(c: &mut Criterion) {
             &bob_address,
             &usmc,
             &mut alice_store.identity_store,
-            None,
             &mut rng,
         )
         .now_or_never()
@@ -90,7 +88,7 @@ pub fn v1(c: &mut Criterion) {
     let encrypted = encrypt_it();
 
     let mut decrypt_it = || {
-        sealed_sender_decrypt_to_usmc(&encrypted, &mut bob_store.identity_store, None)
+        sealed_sender_decrypt_to_usmc(&encrypted, &mut bob_store.identity_store)
             .now_or_never()
             .expect("sync")
             .expect("valid")
@@ -121,7 +119,6 @@ pub fn v2(c: &mut Criterion) {
         &mut alice_store.identity_store,
         &bob_pre_key_bundle,
         &mut rng,
-        None,
     )
     .now_or_never()
     .expect("sync")
@@ -140,7 +137,7 @@ pub fn v2(c: &mut Criterion) {
         alice_address.name().to_string(),
         None,
         *alice_store
-            .get_identity_key_pair(None)
+            .get_identity_key_pair()
             .now_or_never()
             .expect("sync")
             .expect("valid")
@@ -172,7 +169,6 @@ pub fn v2(c: &mut Criterion) {
                 .expect("present"),
             &usmc,
             &mut alice_store.identity_store,
-            None,
             &mut rng,
         )
         .now_or_never()
@@ -188,7 +184,7 @@ pub fn v2(c: &mut Criterion) {
         .expect("at least one destination");
 
     let mut decrypt_it = || {
-        sealed_sender_decrypt_to_usmc(&incoming, &mut bob_store.identity_store, None)
+        sealed_sender_decrypt_to_usmc(&incoming, &mut bob_store.identity_store)
             .now_or_never()
             .expect("sync")
             .expect("valid")
@@ -216,7 +212,6 @@ pub fn v2(c: &mut Criterion) {
             &mut alice_store.identity_store,
             &next_pre_key_bundle,
             &mut rng,
-            None,
         )
         .now_or_never()
         .expect("sync")
@@ -241,7 +236,6 @@ pub fn v2(c: &mut Criterion) {
                             .expect("present"),
                         &usmc,
                         &mut alice_store.identity_store,
-                        None,
                         &mut rng,
                     )
                     .now_or_never()
@@ -269,7 +263,6 @@ pub fn v2(c: &mut Criterion) {
                             .expect("present"),
                         &usmc,
                         &mut alice_store.identity_store,
-                        None,
                         &mut rng,
                     )
                     .now_or_never()

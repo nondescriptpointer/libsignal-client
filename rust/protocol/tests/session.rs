@@ -28,7 +28,7 @@ fn test_basic_prekey_v3() -> Result<(), SignalProtocolError> {
 
         let bob_signed_pre_key_public = bob_signed_pre_key_pair.public_key.serialize();
         let bob_signed_pre_key_signature = bob_store
-            .get_identity_key_pair(None)
+            .get_identity_key_pair()
             .await?
             .private_key()
             .calculate_signature(&bob_signed_pre_key_public, &mut csprng)?;
@@ -37,13 +37,13 @@ fn test_basic_prekey_v3() -> Result<(), SignalProtocolError> {
         let signed_pre_key_id = 22;
 
         let bob_pre_key_bundle = PreKeyBundle::new(
-            bob_store.get_local_registration_id(None).await?,
+            bob_store.get_local_registration_id().await?,
             1,                                               // device id
             Some((pre_key_id, bob_pre_key_pair.public_key)), // pre key
             signed_pre_key_id,                               // signed pre key id
             bob_signed_pre_key_pair.public_key,
             bob_signed_pre_key_signature.to_vec(),
-            *bob_store.get_identity_key_pair(None).await?.identity_key(),
+            *bob_store.get_identity_key_pair().await?.identity_key(),
         )?;
 
         process_prekey_bundle(
@@ -52,30 +52,29 @@ fn test_basic_prekey_v3() -> Result<(), SignalProtocolError> {
             &mut alice_store.identity_store,
             &bob_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
         assert!(alice_store
-            .load_session(&bob_address, None)
+            .load_session(&bob_address)
             .await?
             .is_some());
         assert_eq!(
             alice_store
-                .load_session(&bob_address, None)
+                .load_session(&bob_address)
                 .await?
                 .expect("session found")
                 .session_version()?,
             3
         );
         assert!(alice_store
-            .load_session(&bob_address, None)
+            .load_session(&bob_address)
             .await?
             .expect("session found")
             .has_sender_chain()
             .expect("can ask about sender chain"));
         assert!(!alice_store
-            .load_session(&bob_address, None)
+            .load_session(&bob_address)
             .await?
             .expect("session found")
             .needs_pni_signature()
@@ -98,7 +97,6 @@ fn test_basic_prekey_v3() -> Result<(), SignalProtocolError> {
             .save_pre_key(
                 pre_key_id,
                 &PreKeyRecord::new(pre_key_id, &bob_pre_key_pair),
-                None,
             )
             .await?;
         bob_store
@@ -110,7 +108,6 @@ fn test_basic_prekey_v3() -> Result<(), SignalProtocolError> {
                     &bob_signed_pre_key_pair,
                     &bob_signed_pre_key_signature,
                 ),
-                None,
             )
             .await?;
 
@@ -124,11 +121,11 @@ fn test_basic_prekey_v3() -> Result<(), SignalProtocolError> {
         let bobs_response = "Who watches the watchers?";
 
         assert!(bob_store
-            .load_session(&alice_address, None)
+            .load_session(&alice_address)
             .await?
             .is_some());
         let bobs_session_with_alice = bob_store
-            .load_session(&alice_address, None)
+            .load_session(&alice_address)
             .await?
             .expect("session found");
         assert_eq!(bobs_session_with_alice.session_version()?, 3);
@@ -166,7 +163,7 @@ fn test_basic_prekey_v3() -> Result<(), SignalProtocolError> {
 
         let bob_signed_pre_key_public = bob_signed_pre_key_pair.public_key.serialize();
         let bob_signed_pre_key_signature = bob_store
-            .get_identity_key_pair(None)
+            .get_identity_key_pair()
             .await?
             .private_key()
             .calculate_signature(&bob_signed_pre_key_public, &mut csprng)?;
@@ -175,20 +172,19 @@ fn test_basic_prekey_v3() -> Result<(), SignalProtocolError> {
         let signed_pre_key_id = 22;
 
         let bob_pre_key_bundle = PreKeyBundle::new(
-            bob_store.get_local_registration_id(None).await?,
+            bob_store.get_local_registration_id().await?,
             1,                                                   // device id
             Some((pre_key_id + 1, bob_pre_key_pair.public_key)), // pre key,
             signed_pre_key_id + 1,
             bob_signed_pre_key_pair.public_key,
             bob_signed_pre_key_signature.to_vec(),
-            *bob_store.get_identity_key_pair(None).await?.identity_key(),
+            *bob_store.get_identity_key_pair().await?.identity_key(),
         )?;
 
         bob_store
             .save_pre_key(
                 pre_key_id + 1,
                 &PreKeyRecord::new(pre_key_id + 1, &bob_pre_key_pair),
-                None,
             )
             .await?;
         bob_store
@@ -200,7 +196,6 @@ fn test_basic_prekey_v3() -> Result<(), SignalProtocolError> {
                     &bob_signed_pre_key_pair,
                     &bob_signed_pre_key_signature,
                 ),
-                None,
             )
             .await?;
 
@@ -210,7 +205,6 @@ fn test_basic_prekey_v3() -> Result<(), SignalProtocolError> {
             &mut alice_store.identity_store,
             &bob_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
@@ -228,10 +222,9 @@ fn test_basic_prekey_v3() -> Result<(), SignalProtocolError> {
                 .save_identity(
                     &alice_address,
                     alice_store
-                        .get_identity_key_pair(None)
+                        .get_identity_key_pair()
                         .await?
                         .identity_key(),
-                    None,
                 )
                 .await?
         );
@@ -244,14 +237,14 @@ fn test_basic_prekey_v3() -> Result<(), SignalProtocolError> {
 
         // Sign pre-key with wrong key:
         let bob_pre_key_bundle = PreKeyBundle::new(
-            bob_store.get_local_registration_id(None).await?,
+            bob_store.get_local_registration_id().await?,
             1,                                               // device id
             Some((pre_key_id, bob_pre_key_pair.public_key)), // pre key
             signed_pre_key_id,
             bob_signed_pre_key_pair.public_key,
             bob_signed_pre_key_signature.to_vec(),
             *alice_store
-                .get_identity_key_pair(None)
+                .get_identity_key_pair()
                 .await?
                 .identity_key(),
         )?;
@@ -262,7 +255,6 @@ fn test_basic_prekey_v3() -> Result<(), SignalProtocolError> {
             &mut alice_store.identity_store,
             &bob_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await
         .is_err());
@@ -291,7 +283,7 @@ fn chain_jump_over_limit() -> Result<(), SignalProtocolError> {
 
         let bob_signed_pre_key_public = bob_signed_pre_key_pair.public_key.serialize();
         let bob_signed_pre_key_signature = bob_store
-            .get_identity_key_pair(None)
+            .get_identity_key_pair()
             .await?
             .private_key()
             .calculate_signature(&bob_signed_pre_key_public, &mut csprng)?;
@@ -300,13 +292,13 @@ fn chain_jump_over_limit() -> Result<(), SignalProtocolError> {
         let signed_pre_key_id = 22;
 
         let bob_pre_key_bundle = PreKeyBundle::new(
-            bob_store.get_local_registration_id(None).await?,
+            bob_store.get_local_registration_id().await?,
             1,                                               // device id
             Some((pre_key_id, bob_pre_key_pair.public_key)), // pre key
             signed_pre_key_id,                               // signed pre key id
             bob_signed_pre_key_pair.public_key,
             bob_signed_pre_key_signature.to_vec(),
-            *bob_store.get_identity_key_pair(None).await?.identity_key(),
+            *bob_store.get_identity_key_pair().await?.identity_key(),
         )?;
 
         process_prekey_bundle(
@@ -315,7 +307,6 @@ fn chain_jump_over_limit() -> Result<(), SignalProtocolError> {
             &mut alice_store.identity_store,
             &bob_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
@@ -323,7 +314,6 @@ fn chain_jump_over_limit() -> Result<(), SignalProtocolError> {
             .save_pre_key(
                 pre_key_id,
                 &PreKeyRecord::new(pre_key_id, &bob_pre_key_pair),
-                None,
             )
             .await?;
         bob_store
@@ -335,7 +325,6 @@ fn chain_jump_over_limit() -> Result<(), SignalProtocolError> {
                     &bob_signed_pre_key_pair,
                     &bob_signed_pre_key_signature,
                 ),
-                None,
             )
             .await?;
 
@@ -380,7 +369,7 @@ fn chain_jump_over_limit_with_self() -> Result<(), SignalProtocolError> {
 
         let a2_signed_pre_key_public = a2_signed_pre_key_pair.public_key.serialize();
         let a2_signed_pre_key_signature = a2_store
-            .get_identity_key_pair(None)
+            .get_identity_key_pair()
             .await?
             .private_key()
             .calculate_signature(&a2_signed_pre_key_public, &mut csprng)?;
@@ -389,13 +378,13 @@ fn chain_jump_over_limit_with_self() -> Result<(), SignalProtocolError> {
         let signed_pre_key_id = 22;
 
         let a2_pre_key_bundle = PreKeyBundle::new(
-            a2_store.get_local_registration_id(None).await?,
+            a2_store.get_local_registration_id().await?,
             1,                                              // device id
             Some((pre_key_id, a2_pre_key_pair.public_key)), // pre key
             signed_pre_key_id,                              // signed pre key id
             a2_signed_pre_key_pair.public_key,
             a2_signed_pre_key_signature.to_vec(),
-            *a2_store.get_identity_key_pair(None).await?.identity_key(),
+            *a2_store.get_identity_key_pair().await?.identity_key(),
         )?;
 
         process_prekey_bundle(
@@ -404,7 +393,6 @@ fn chain_jump_over_limit_with_self() -> Result<(), SignalProtocolError> {
             &mut a1_store.identity_store,
             &a2_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
@@ -412,7 +400,6 @@ fn chain_jump_over_limit_with_self() -> Result<(), SignalProtocolError> {
             .save_pre_key(
                 pre_key_id,
                 &PreKeyRecord::new(pre_key_id, &a2_pre_key_pair),
-                None,
             )
             .await?;
         a2_store
@@ -424,7 +411,6 @@ fn chain_jump_over_limit_with_self() -> Result<(), SignalProtocolError> {
                     &a2_signed_pre_key_pair,
                     &a2_signed_pre_key_signature,
                 ),
-                None,
             )
             .await?;
 
@@ -474,7 +460,7 @@ fn test_bad_signed_pre_key_signature() -> Result<(), SignalProtocolError> {
 
         let bob_signed_pre_key_public = bob_signed_pre_key_pair.public_key.serialize();
         let bob_signed_pre_key_signature = bob_store
-            .get_identity_key_pair(None)
+            .get_identity_key_pair()
             .await?
             .private_key()
             .calculate_signature(&bob_signed_pre_key_public, &mut csprng)?
@@ -489,13 +475,13 @@ fn test_bad_signed_pre_key_signature() -> Result<(), SignalProtocolError> {
             bad_signature[bit / 8] ^= 0x01u8 << (bit % 8);
 
             let bob_pre_key_bundle = PreKeyBundle::new(
-                bob_store.get_local_registration_id(None).await?,
+                bob_store.get_local_registration_id().await?,
                 1,
                 Some((pre_key_id, bob_pre_key_pair.public_key)),
                 signed_pre_key_id,
                 bob_signed_pre_key_pair.public_key,
                 bad_signature,
-                *bob_store.get_identity_key_pair(None).await?.identity_key(),
+                *bob_store.get_identity_key_pair().await?.identity_key(),
             )?;
 
             assert!(process_prekey_bundle(
@@ -504,7 +490,6 @@ fn test_bad_signed_pre_key_signature() -> Result<(), SignalProtocolError> {
                 &mut alice_store.identity_store,
                 &bob_pre_key_bundle,
                 &mut csprng,
-                None,
             )
             .await
             .is_err());
@@ -513,13 +498,13 @@ fn test_bad_signed_pre_key_signature() -> Result<(), SignalProtocolError> {
         // Finally check that the non-corrupted signature is accepted:
 
         let bob_pre_key_bundle = PreKeyBundle::new(
-            bob_store.get_local_registration_id(None).await?,
+            bob_store.get_local_registration_id().await?,
             1,
             Some((pre_key_id, bob_pre_key_pair.public_key)),
             signed_pre_key_id,
             bob_signed_pre_key_pair.public_key,
             bob_signed_pre_key_signature,
-            *bob_store.get_identity_key_pair(None).await?.identity_key(),
+            *bob_store.get_identity_key_pair().await?.identity_key(),
         )?;
 
         process_prekey_bundle(
@@ -528,7 +513,6 @@ fn test_bad_signed_pre_key_signature() -> Result<(), SignalProtocolError> {
             &mut alice_store.identity_store,
             &bob_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
@@ -556,7 +540,7 @@ fn repeat_bundle_message_v3() -> Result<(), SignalProtocolError> {
 
         let bob_signed_pre_key_public = bob_signed_pre_key_pair.public_key.serialize();
         let bob_signed_pre_key_signature = bob_store
-            .get_identity_key_pair(None)
+            .get_identity_key_pair()
             .await?
             .private_key()
             .calculate_signature(&bob_signed_pre_key_public, &mut csprng)?;
@@ -565,13 +549,13 @@ fn repeat_bundle_message_v3() -> Result<(), SignalProtocolError> {
         let signed_pre_key_id = 22;
 
         let bob_pre_key_bundle = PreKeyBundle::new(
-            bob_store.get_local_registration_id(None).await?,
+            bob_store.get_local_registration_id().await?,
             1,                                               // device id
             Some((pre_key_id, bob_pre_key_pair.public_key)), // pre key
             signed_pre_key_id,                               // signed pre key id
             bob_signed_pre_key_pair.public_key,
             bob_signed_pre_key_signature.to_vec(),
-            *bob_store.get_identity_key_pair(None).await?.identity_key(),
+            *bob_store.get_identity_key_pair().await?.identity_key(),
         )?;
 
         process_prekey_bundle(
@@ -580,17 +564,16 @@ fn repeat_bundle_message_v3() -> Result<(), SignalProtocolError> {
             &mut alice_store.identity_store,
             &bob_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
         assert!(alice_store
-            .load_session(&bob_address, None)
+            .load_session(&bob_address)
             .await?
             .is_some());
         assert_eq!(
             alice_store
-                .load_session(&bob_address, None)
+                .load_session(&bob_address)
                 .await?
                 .expect("session found")
                 .session_version()?,
@@ -619,7 +602,6 @@ fn repeat_bundle_message_v3() -> Result<(), SignalProtocolError> {
             .save_pre_key(
                 pre_key_id,
                 &PreKeyRecord::new(pre_key_id, &bob_pre_key_pair),
-                None,
             )
             .await?;
         bob_store
@@ -631,7 +613,6 @@ fn repeat_bundle_message_v3() -> Result<(), SignalProtocolError> {
                     &bob_signed_pre_key_pair,
                     &bob_signed_pre_key_signature,
                 ),
-                None,
             )
             .await?;
 
@@ -691,7 +672,7 @@ fn bad_message_bundle() -> Result<(), SignalProtocolError> {
 
         let bob_signed_pre_key_public = bob_signed_pre_key_pair.public_key.serialize();
         let bob_signed_pre_key_signature = bob_store
-            .get_identity_key_pair(None)
+            .get_identity_key_pair()
             .await?
             .private_key()
             .calculate_signature(&bob_signed_pre_key_public, &mut csprng)?;
@@ -700,13 +681,13 @@ fn bad_message_bundle() -> Result<(), SignalProtocolError> {
         let signed_pre_key_id = 22;
 
         let bob_pre_key_bundle = PreKeyBundle::new(
-            bob_store.get_local_registration_id(None).await?,
+            bob_store.get_local_registration_id().await?,
             1, // device id
             Some((pre_key_id, bob_pre_key_pair.public_key)),
             signed_pre_key_id, // signed pre key id
             bob_signed_pre_key_pair.public_key,
             bob_signed_pre_key_signature.to_vec(),
-            *bob_store.get_identity_key_pair(None).await?.identity_key(),
+            *bob_store.get_identity_key_pair().await?.identity_key(),
         )?;
 
         process_prekey_bundle(
@@ -715,7 +696,6 @@ fn bad_message_bundle() -> Result<(), SignalProtocolError> {
             &mut alice_store.identity_store,
             &bob_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
@@ -723,7 +703,6 @@ fn bad_message_bundle() -> Result<(), SignalProtocolError> {
             .save_pre_key(
                 pre_key_id,
                 &PreKeyRecord::new(pre_key_id, &bob_pre_key_pair),
-                None,
             )
             .await?;
         bob_store
@@ -735,17 +714,16 @@ fn bad_message_bundle() -> Result<(), SignalProtocolError> {
                     &bob_signed_pre_key_pair,
                     &bob_signed_pre_key_signature,
                 ),
-                None,
             )
             .await?;
 
         assert!(alice_store
-            .load_session(&bob_address, None)
+            .load_session(&bob_address)
             .await?
             .is_some());
         assert_eq!(
             alice_store
-                .load_session(&bob_address, None)
+                .load_session(&bob_address)
                 .await?
                 .expect("session found")
                 .session_version()?,
@@ -754,7 +732,7 @@ fn bad_message_bundle() -> Result<(), SignalProtocolError> {
 
         let original_message = "L'homme est condamné à être libre";
 
-        assert!(bob_store.get_pre_key(pre_key_id, None).await.is_ok());
+        assert!(bob_store.get_pre_key(pre_key_id).await.is_ok());
         let outgoing_message = encrypt(&mut alice_store, &bob_address, original_message).await?;
 
         assert_eq!(
@@ -774,7 +752,7 @@ fn bad_message_bundle() -> Result<(), SignalProtocolError> {
         assert!(decrypt(&mut bob_store, &alice_address, &incoming_message)
             .await
             .is_err());
-        assert!(bob_store.get_pre_key(pre_key_id, None).await.is_ok());
+        assert!(bob_store.get_pre_key(pre_key_id).await.is_ok());
 
         let incoming_message = CiphertextMessage::PreKeySignalMessage(
             PreKeySignalMessage::try_from(outgoing_message.as_slice())?,
@@ -787,7 +765,7 @@ fn bad_message_bundle() -> Result<(), SignalProtocolError> {
             original_message
         );
         assert!(matches!(
-            bob_store.get_pre_key(pre_key_id, None).await.unwrap_err(),
+            bob_store.get_pre_key(pre_key_id).await.unwrap_err(),
             SignalProtocolError::InvalidPreKeyId
         ));
 
@@ -812,7 +790,7 @@ fn optional_one_time_prekey() -> Result<(), SignalProtocolError> {
 
         let bob_signed_pre_key_public = bob_signed_pre_key_pair.public_key.serialize();
         let bob_signed_pre_key_signature = bob_store
-            .get_identity_key_pair(None)
+            .get_identity_key_pair()
             .await?
             .private_key()
             .calculate_signature(&bob_signed_pre_key_public, &mut csprng)?;
@@ -820,13 +798,13 @@ fn optional_one_time_prekey() -> Result<(), SignalProtocolError> {
         let signed_pre_key_id = 22;
 
         let bob_pre_key_bundle = PreKeyBundle::new(
-            bob_store.get_local_registration_id(None).await?,
+            bob_store.get_local_registration_id().await?,
             1,                 // device id
             None,              // no pre key
             signed_pre_key_id, // signed pre key id
             bob_signed_pre_key_pair.public_key,
             bob_signed_pre_key_signature.to_vec(),
-            *bob_store.get_identity_key_pair(None).await?.identity_key(),
+            *bob_store.get_identity_key_pair().await?.identity_key(),
         )?;
 
         process_prekey_bundle(
@@ -835,13 +813,12 @@ fn optional_one_time_prekey() -> Result<(), SignalProtocolError> {
             &mut alice_store.identity_store,
             &bob_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
         assert_eq!(
             alice_store
-                .load_session(&bob_address, None)
+                .load_session(&bob_address)
                 .await?
                 .expect("session found")
                 .session_version()?,
@@ -870,7 +847,6 @@ fn optional_one_time_prekey() -> Result<(), SignalProtocolError> {
                     &bob_signed_pre_key_pair,
                     &bob_signed_pre_key_signature,
                 ),
-                None,
             )
             .await?;
 
@@ -906,10 +882,10 @@ fn message_key_limits() -> Result<(), SignalProtocolError> {
         let mut bob_store = support::test_in_memory_protocol_store()?;
 
         alice_store
-            .store_session(&bob_address, &alice_session_record, None)
+            .store_session(&bob_address, &alice_session_record)
             .await?;
         bob_store
-            .store_session(&alice_address, &bob_session_record, None)
+            .store_session(&alice_address, &bob_session_record)
             .await?;
 
         const MAX_MESSAGE_KEYS: usize = 2000; // same value as in library
@@ -968,10 +944,10 @@ fn run_session_interaction(
         let mut bob_store = support::test_in_memory_protocol_store()?;
 
         alice_store
-            .store_session(&bob_address, &alice_session, None)
+            .store_session(&bob_address, &alice_session)
             .await?;
         bob_store
-            .store_session(&alice_address, &bob_session, None)
+            .store_session(&alice_address, &bob_session)
             .await?;
 
         let alice_plaintext = "This is Alice's message";
@@ -1151,12 +1127,12 @@ async fn is_session_id_equal(
     bob_address: &ProtocolAddress,
 ) -> Result<bool, SignalProtocolError> {
     Ok(alice_store
-        .load_session(bob_address, None)
+        .load_session(bob_address)
         .await?
         .expect("session found")
         .alice_base_key()?
         == bob_store
-            .load_session(alice_address, None)
+            .load_session(alice_address)
             .await?
             .expect("session found")
             .alice_base_key()?)
@@ -1182,7 +1158,6 @@ fn basic_simultaneous_initiate() -> Result<(), SignalProtocolError> {
             &mut alice_store.identity_store,
             &bob_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
@@ -1192,7 +1167,6 @@ fn basic_simultaneous_initiate() -> Result<(), SignalProtocolError> {
             &mut bob_store.identity_store,
             &alice_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
@@ -1240,7 +1214,7 @@ fn basic_simultaneous_initiate() -> Result<(), SignalProtocolError> {
 
         assert_eq!(
             alice_store
-                .load_session(&bob_address, None)
+                .load_session(&bob_address)
                 .await?
                 .expect("session found")
                 .session_version()?,
@@ -1248,7 +1222,7 @@ fn basic_simultaneous_initiate() -> Result<(), SignalProtocolError> {
         );
         assert_eq!(
             bob_store
-                .load_session(&alice_address, None)
+                .load_session(&alice_address)
                 .await?
                 .expect("session found")
                 .session_version()?,
@@ -1322,7 +1296,6 @@ fn simultaneous_initiate_with_lossage() -> Result<(), SignalProtocolError> {
             &mut alice_store.identity_store,
             &bob_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
@@ -1332,7 +1305,6 @@ fn simultaneous_initiate_with_lossage() -> Result<(), SignalProtocolError> {
             &mut bob_store.identity_store,
             &alice_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
@@ -1367,7 +1339,7 @@ fn simultaneous_initiate_with_lossage() -> Result<(), SignalProtocolError> {
 
         assert_eq!(
             alice_store
-                .load_session(&bob_address, None)
+                .load_session(&bob_address)
                 .await?
                 .expect("session found")
                 .session_version()?,
@@ -1375,7 +1347,7 @@ fn simultaneous_initiate_with_lossage() -> Result<(), SignalProtocolError> {
         );
         assert_eq!(
             bob_store
-                .load_session(&alice_address, None)
+                .load_session(&alice_address)
                 .await?
                 .expect("session found")
                 .session_version()?,
@@ -1444,7 +1416,6 @@ fn simultaneous_initiate_lost_message() -> Result<(), SignalProtocolError> {
             &mut alice_store.identity_store,
             &bob_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
@@ -1454,7 +1425,6 @@ fn simultaneous_initiate_lost_message() -> Result<(), SignalProtocolError> {
             &mut bob_store.identity_store,
             &alice_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
@@ -1502,7 +1472,7 @@ fn simultaneous_initiate_lost_message() -> Result<(), SignalProtocolError> {
 
         assert_eq!(
             alice_store
-                .load_session(&bob_address, None)
+                .load_session(&bob_address)
                 .await?
                 .expect("session found")
                 .session_version()?,
@@ -1510,7 +1480,7 @@ fn simultaneous_initiate_lost_message() -> Result<(), SignalProtocolError> {
         );
         assert_eq!(
             bob_store
-                .load_session(&alice_address, None)
+                .load_session(&alice_address)
                 .await?
                 .expect("session found")
                 .session_version()?,
@@ -1576,7 +1546,6 @@ fn simultaneous_initiate_repeated_messages() -> Result<(), SignalProtocolError> 
                 &mut alice_store.identity_store,
                 &bob_pre_key_bundle,
                 &mut csprng,
-                None,
             )
             .await?;
 
@@ -1586,7 +1555,6 @@ fn simultaneous_initiate_repeated_messages() -> Result<(), SignalProtocolError> 
                 &mut bob_store.identity_store,
                 &alice_pre_key_bundle,
                 &mut csprng,
-                None,
             )
             .await?;
 
@@ -1635,7 +1603,7 @@ fn simultaneous_initiate_repeated_messages() -> Result<(), SignalProtocolError> 
 
             assert_eq!(
                 alice_store
-                    .load_session(&bob_address, None)
+                    .load_session(&bob_address)
                     .await?
                     .expect("session found")
                     .session_version()?,
@@ -1643,7 +1611,7 @@ fn simultaneous_initiate_repeated_messages() -> Result<(), SignalProtocolError> 
             );
             assert_eq!(
                 bob_store
-                    .load_session(&alice_address, None)
+                    .load_session(&alice_address)
                     .await?
                     .expect("session found")
                     .session_version()?,
@@ -1702,7 +1670,7 @@ fn simultaneous_initiate_repeated_messages() -> Result<(), SignalProtocolError> 
 
             assert_eq!(
                 alice_store
-                    .load_session(&bob_address, None)
+                    .load_session(&bob_address)
                     .await?
                     .expect("session found")
                     .session_version()?,
@@ -1710,7 +1678,7 @@ fn simultaneous_initiate_repeated_messages() -> Result<(), SignalProtocolError> 
             );
             assert_eq!(
                 bob_store
-                    .load_session(&alice_address, None)
+                    .load_session(&alice_address)
                     .await?
                     .expect("session found")
                     .session_version()?,
@@ -1776,7 +1744,6 @@ fn simultaneous_initiate_lost_message_repeated_messages() -> Result<(), SignalPr
             &mut alice_store.identity_store,
             &bob_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
         let lost_message_for_bob =
@@ -1792,7 +1759,6 @@ fn simultaneous_initiate_lost_message_repeated_messages() -> Result<(), SignalPr
                 &mut alice_store.identity_store,
                 &bob_pre_key_bundle,
                 &mut csprng,
-                None,
             )
             .await?;
 
@@ -1802,7 +1768,6 @@ fn simultaneous_initiate_lost_message_repeated_messages() -> Result<(), SignalPr
                 &mut bob_store.identity_store,
                 &alice_pre_key_bundle,
                 &mut csprng,
-                None,
             )
             .await?;
 
@@ -1851,7 +1816,7 @@ fn simultaneous_initiate_lost_message_repeated_messages() -> Result<(), SignalPr
 
             assert_eq!(
                 alice_store
-                    .load_session(&bob_address, None)
+                    .load_session(&bob_address)
                     .await?
                     .expect("session found")
                     .session_version()?,
@@ -1859,7 +1824,7 @@ fn simultaneous_initiate_lost_message_repeated_messages() -> Result<(), SignalPr
             );
             assert_eq!(
                 bob_store
-                    .load_session(&alice_address, None)
+                    .load_session(&alice_address)
                     .await?
                     .expect("session found")
                     .session_version()?,
@@ -1918,7 +1883,7 @@ fn simultaneous_initiate_lost_message_repeated_messages() -> Result<(), SignalPr
 
             assert_eq!(
                 alice_store
-                    .load_session(&bob_address, None)
+                    .load_session(&bob_address)
                     .await?
                     .expect("session found")
                     .session_version()?,
@@ -1926,7 +1891,7 @@ fn simultaneous_initiate_lost_message_repeated_messages() -> Result<(), SignalPr
             );
             assert_eq!(
                 bob_store
-                    .load_session(&alice_address, None)
+                    .load_session(&alice_address)
                     .await?
                     .expect("session found")
                     .session_version()?,
@@ -2026,13 +1991,12 @@ fn test_needs_pni_signature() -> Result<(), SignalProtocolError> {
             &mut alice_store.identity_store,
             &bob_pre_key_bundle,
             &mut csprng,
-            None,
         )
         .await?;
 
         // Not set by default.
         let mut alice_session_with_bob = alice_store
-            .load_session(&bob_address, None)
+            .load_session(&bob_address)
             .await?
             .expect("session found");
         assert!(!alice_session_with_bob
@@ -2048,14 +2012,14 @@ fn test_needs_pni_signature() -> Result<(), SignalProtocolError> {
             .expect("has current session"));
 
         alice_store
-            .store_session(&bob_address, &alice_session_with_bob, None)
+            .store_session(&bob_address, &alice_session_with_bob)
             .await?;
 
         // Sending a message doesn't clear the state...
         let message = encrypt(&mut alice_store, &bob_address, "SYN").await?;
 
         assert!(alice_store
-            .load_session(&bob_address, None)
+            .load_session(&bob_address)
             .await?
             .expect("session found")
             .needs_pni_signature()
@@ -2068,7 +2032,7 @@ fn test_needs_pni_signature() -> Result<(), SignalProtocolError> {
         let _ = decrypt(&mut alice_store, &bob_address, &reply).await?;
 
         let mut alice_session_with_bob = alice_store
-            .load_session(&bob_address, None)
+            .load_session(&bob_address)
             .await?
             .expect("session found");
         assert!(!alice_session_with_bob

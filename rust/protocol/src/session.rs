@@ -4,7 +4,7 @@
 //
 
 use crate::{
-    Context, Direction, IdentityKeyStore, KeyPair, PreKeyBundle, PreKeySignalMessage, PreKeyStore,
+    Direction, IdentityKeyStore, KeyPair, PreKeyBundle, PreKeySignalMessage, PreKeyStore,
     ProtocolAddress, Result, SessionRecord, SessionStore, SignalProtocolError, SignedPreKeyStore,
 };
 
@@ -29,7 +29,6 @@ pub async fn process_prekey(
     identity_store: &mut dyn IdentityKeyStore,
     pre_key_store: &mut dyn PreKeyStore,
     signed_prekey_store: &mut dyn SignedPreKeyStore,
-    ctx: Context,
 ) -> Result<Option<PreKeyId>> {
     let their_identity_key = message.identity_key();
 
@@ -38,7 +37,6 @@ pub async fn process_prekey(
             remote_address,
             their_identity_key,
             Direction::Receiving,
-            ctx,
         )
         .await?
     {
@@ -54,12 +52,11 @@ pub async fn process_prekey(
         signed_prekey_store,
         pre_key_store,
         identity_store,
-        ctx,
     )
     .await?;
 
     identity_store
-        .save_identity(remote_address, their_identity_key, ctx)
+        .save_identity(remote_address, their_identity_key)
         .await?;
 
     Ok(unsigned_pre_key_id)
@@ -72,7 +69,6 @@ async fn process_prekey_v3(
     signed_prekey_store: &mut dyn SignedPreKeyStore,
     pre_key_store: &mut dyn PreKeyStore,
     identity_store: &mut dyn IdentityKeyStore,
-    ctx: Context,
 ) -> Result<Option<PreKeyId>> {
     if session_record.has_session_state(
         message.message_version() as u32,
@@ -83,7 +79,7 @@ async fn process_prekey_v3(
     }
 
     let our_signed_pre_key_pair = signed_prekey_store
-        .get_signed_pre_key(message.signed_pre_key_id(), ctx)
+        .get_signed_pre_key(message.signed_pre_key_id())
         .await?
         .key_pair()?;
 
@@ -91,7 +87,7 @@ async fn process_prekey_v3(
         log::info!("processing PreKey message from {}", remote_address);
         Some(
             pre_key_store
-                .get_pre_key(pre_key_id, ctx)
+                .get_pre_key(pre_key_id)
                 .await?
                 .key_pair()?,
         )
@@ -104,7 +100,7 @@ async fn process_prekey_v3(
     };
 
     let parameters = BobSignalProtocolParameters::new(
-        identity_store.get_identity_key_pair(ctx).await?,
+        identity_store.get_identity_key_pair().await?,
         our_signed_pre_key_pair, // signed pre key
         our_one_time_pre_key_pair,
         our_signed_pre_key_pair, // ratchet key
@@ -116,7 +112,7 @@ async fn process_prekey_v3(
 
     let mut new_session = ratchet::initialize_bob_session(&parameters)?;
 
-    new_session.set_local_registration_id(identity_store.get_local_registration_id(ctx).await?)?;
+    new_session.set_local_registration_id(identity_store.get_local_registration_id().await?)?;
     new_session.set_remote_registration_id(message.registration_id())?;
     new_session.set_alice_base_key(&message.base_key().serialize())?;
 
@@ -131,12 +127,11 @@ pub async fn process_prekey_bundle<R: Rng + CryptoRng>(
     identity_store: &mut dyn IdentityKeyStore,
     bundle: &PreKeyBundle,
     mut csprng: &mut R,
-    ctx: Context,
 ) -> Result<()> {
     let their_identity_key = bundle.identity_key()?;
 
     if !identity_store
-        .is_trusted_identity(remote_address, their_identity_key, Direction::Sending, ctx)
+        .is_trusted_identity(remote_address, their_identity_key, Direction::Sending)
         .await?
     {
         return Err(SignalProtocolError::UntrustedIdentity(
@@ -152,7 +147,7 @@ pub async fn process_prekey_bundle<R: Rng + CryptoRng>(
     }
 
     let mut session_record = session_store
-        .load_session(remote_address, ctx)
+        .load_session(remote_address)
         .await?
         .unwrap_or_else(SessionRecord::new_fresh);
 
@@ -162,7 +157,7 @@ pub async fn process_prekey_bundle<R: Rng + CryptoRng>(
     let their_one_time_prekey = bundle.pre_key_public()?;
     let their_one_time_prekey_id = bundle.pre_key_id()?;
 
-    let our_identity_key_pair = identity_store.get_identity_key_pair(ctx).await?;
+    let our_identity_key_pair = identity_store.get_identity_key_pair().await?;
 
     let parameters = AliceSignalProtocolParameters::new(
         our_identity_key_pair,
@@ -187,18 +182,18 @@ pub async fn process_prekey_bundle<R: Rng + CryptoRng>(
         &our_base_key_pair.public_key,
     )?;
 
-    session.set_local_registration_id(identity_store.get_local_registration_id(ctx).await?)?;
+    session.set_local_registration_id(identity_store.get_local_registration_id().await?)?;
     session.set_remote_registration_id(bundle.registration_id()?)?;
     session.set_alice_base_key(&our_base_key_pair.public_key.serialize())?;
 
     identity_store
-        .save_identity(remote_address, their_identity_key, ctx)
+        .save_identity(remote_address, their_identity_key)
         .await?;
 
     session_record.promote_state(session)?;
 
     session_store
-        .store_session(remote_address, &session_record, ctx)
+        .store_session(remote_address, &session_record)
         .await?;
 
     Ok(())

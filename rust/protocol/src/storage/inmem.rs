@@ -10,7 +10,6 @@ use crate::{
 
 use crate::state::{PreKeyId, SignedPreKeyId};
 use crate::storage::traits;
-use crate::storage::Context;
 
 use async_trait::async_trait;
 use std::borrow::Cow;
@@ -38,13 +37,13 @@ impl InMemIdentityKeyStore {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl traits::IdentityKeyStore for InMemIdentityKeyStore {
-    async fn get_identity_key_pair(&self, _ctx: Context) -> Result<IdentityKeyPair> {
+    async fn get_identity_key_pair(&self) -> Result<IdentityKeyPair> {
         Ok(self.key_pair)
     }
 
-    async fn get_local_registration_id(&self, _ctx: Context) -> Result<u32> {
+    async fn get_local_registration_id(&self) -> Result<u32> {
         Ok(self.id)
     }
 
@@ -52,7 +51,6 @@ impl traits::IdentityKeyStore for InMemIdentityKeyStore {
         &mut self,
         address: &ProtocolAddress,
         identity: &IdentityKey,
-        _ctx: Context,
     ) -> Result<bool> {
         match self.known_keys.get(address) {
             None => {
@@ -74,7 +72,6 @@ impl traits::IdentityKeyStore for InMemIdentityKeyStore {
         address: &ProtocolAddress,
         identity: &IdentityKey,
         _direction: traits::Direction,
-        _ctx: Context,
     ) -> Result<bool> {
         match self.known_keys.get(address) {
             None => {
@@ -87,7 +84,6 @@ impl traits::IdentityKeyStore for InMemIdentityKeyStore {
     async fn get_identity(
         &self,
         address: &ProtocolAddress,
-        _ctx: Context,
     ) -> Result<Option<IdentityKey>> {
         match self.known_keys.get(address) {
             None => Ok(None),
@@ -115,9 +111,9 @@ impl Default for InMemPreKeyStore {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl traits::PreKeyStore for InMemPreKeyStore {
-    async fn get_pre_key(&self, id: PreKeyId, _ctx: Context) -> Result<PreKeyRecord> {
+    async fn get_pre_key(&self, id: PreKeyId) -> Result<PreKeyRecord> {
         Ok(self
             .pre_keys
             .get(&id)
@@ -129,14 +125,13 @@ impl traits::PreKeyStore for InMemPreKeyStore {
         &mut self,
         id: PreKeyId,
         record: &PreKeyRecord,
-        _ctx: Context,
     ) -> Result<()> {
         // This overwrites old values, which matches Java behavior, but is it correct?
         self.pre_keys.insert(id, record.to_owned());
         Ok(())
     }
 
-    async fn remove_pre_key(&mut self, id: PreKeyId, _ctx: Context) -> Result<()> {
+    async fn remove_pre_key(&mut self, id: PreKeyId) -> Result<()> {
         // If id does not exist this silently does nothing
         self.pre_keys.remove(&id);
         Ok(())
@@ -162,12 +157,11 @@ impl Default for InMemSignedPreKeyStore {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl traits::SignedPreKeyStore for InMemSignedPreKeyStore {
     async fn get_signed_pre_key(
         &self,
         id: SignedPreKeyId,
-        _ctx: Context,
     ) -> Result<SignedPreKeyRecord> {
         Ok(self
             .signed_pre_keys
@@ -180,7 +174,6 @@ impl traits::SignedPreKeyStore for InMemSignedPreKeyStore {
         &mut self,
         id: SignedPreKeyId,
         record: &SignedPreKeyRecord,
-        _ctx: Context,
     ) -> Result<()> {
         // This overwrites old values, which matches Java behavior, but is it correct?
         self.signed_pre_keys.insert(id, record.to_owned());
@@ -226,12 +219,11 @@ impl Default for InMemSessionStore {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl traits::SessionStore for InMemSessionStore {
     async fn load_session(
         &self,
         address: &ProtocolAddress,
-        _ctx: Context,
     ) -> Result<Option<SessionRecord>> {
         match self.sessions.get(address) {
             None => Ok(None),
@@ -243,7 +235,6 @@ impl traits::SessionStore for InMemSessionStore {
         &mut self,
         address: &ProtocolAddress,
         record: &SessionRecord,
-        _ctx: Context,
     ) -> Result<()> {
         self.sessions.insert(address.clone(), record.clone());
         Ok(())
@@ -271,14 +262,13 @@ impl Default for InMemSenderKeyStore {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl traits::SenderKeyStore for InMemSenderKeyStore {
     async fn store_sender_key(
         &mut self,
         sender: &ProtocolAddress,
         distribution_id: Uuid,
         record: &SenderKeyRecord,
-        _ctx: Context,
     ) -> Result<()> {
         self.keys.insert(
             (Cow::Owned(sender.clone()), distribution_id),
@@ -291,7 +281,6 @@ impl traits::SenderKeyStore for InMemSenderKeyStore {
         &mut self,
         sender: &ProtocolAddress,
         distribution_id: Uuid,
-        _ctx: Context,
     ) -> Result<Option<SenderKeyRecord>> {
         Ok(self
             .keys
@@ -321,24 +310,23 @@ impl InMemSignalProtocolStore {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl traits::IdentityKeyStore for InMemSignalProtocolStore {
-    async fn get_identity_key_pair(&self, ctx: Context) -> Result<IdentityKeyPair> {
-        self.identity_store.get_identity_key_pair(ctx).await
+    async fn get_identity_key_pair(&self) -> Result<IdentityKeyPair> {
+        self.identity_store.get_identity_key_pair().await
     }
 
-    async fn get_local_registration_id(&self, ctx: Context) -> Result<u32> {
-        self.identity_store.get_local_registration_id(ctx).await
+    async fn get_local_registration_id(&self) -> Result<u32> {
+        self.identity_store.get_local_registration_id().await
     }
 
     async fn save_identity(
         &mut self,
         address: &ProtocolAddress,
         identity: &IdentityKey,
-        ctx: Context,
     ) -> Result<bool> {
         self.identity_store
-            .save_identity(address, identity, ctx)
+            .save_identity(address, identity)
             .await
     }
 
@@ -347,95 +335,87 @@ impl traits::IdentityKeyStore for InMemSignalProtocolStore {
         address: &ProtocolAddress,
         identity: &IdentityKey,
         direction: traits::Direction,
-        ctx: Context,
     ) -> Result<bool> {
         self.identity_store
-            .is_trusted_identity(address, identity, direction, ctx)
+            .is_trusted_identity(address, identity, direction)
             .await
     }
 
     async fn get_identity(
         &self,
         address: &ProtocolAddress,
-        ctx: Context,
     ) -> Result<Option<IdentityKey>> {
-        self.identity_store.get_identity(address, ctx).await
+        self.identity_store.get_identity(address).await
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl traits::PreKeyStore for InMemSignalProtocolStore {
-    async fn get_pre_key(&self, id: PreKeyId, ctx: Context) -> Result<PreKeyRecord> {
-        self.pre_key_store.get_pre_key(id, ctx).await
+    async fn get_pre_key(&self, id: PreKeyId) -> Result<PreKeyRecord> {
+        self.pre_key_store.get_pre_key(id).await
     }
 
     async fn save_pre_key(
         &mut self,
         id: PreKeyId,
         record: &PreKeyRecord,
-        ctx: Context,
     ) -> Result<()> {
-        self.pre_key_store.save_pre_key(id, record, ctx).await
+        self.pre_key_store.save_pre_key(id, record).await
     }
 
-    async fn remove_pre_key(&mut self, id: PreKeyId, ctx: Context) -> Result<()> {
-        self.pre_key_store.remove_pre_key(id, ctx).await
+    async fn remove_pre_key(&mut self, id: PreKeyId) -> Result<()> {
+        self.pre_key_store.remove_pre_key(id).await
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl traits::SignedPreKeyStore for InMemSignalProtocolStore {
     async fn get_signed_pre_key(
         &self,
         id: SignedPreKeyId,
-        ctx: Context,
     ) -> Result<SignedPreKeyRecord> {
-        self.signed_pre_key_store.get_signed_pre_key(id, ctx).await
+        self.signed_pre_key_store.get_signed_pre_key(id).await
     }
 
     async fn save_signed_pre_key(
         &mut self,
         id: SignedPreKeyId,
         record: &SignedPreKeyRecord,
-        ctx: Context,
     ) -> Result<()> {
         self.signed_pre_key_store
-            .save_signed_pre_key(id, record, ctx)
+            .save_signed_pre_key(id, record)
             .await
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl traits::SessionStore for InMemSignalProtocolStore {
     async fn load_session(
         &self,
         address: &ProtocolAddress,
-        ctx: Context,
     ) -> Result<Option<SessionRecord>> {
-        self.session_store.load_session(address, ctx).await
+        self.session_store.load_session(address).await
     }
 
     async fn store_session(
         &mut self,
         address: &ProtocolAddress,
         record: &SessionRecord,
-        ctx: Context,
     ) -> Result<()> {
-        self.session_store.store_session(address, record, ctx).await
+        self.session_store.store_session(address, record).await
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl traits::SenderKeyStore for InMemSignalProtocolStore {
     async fn store_sender_key(
         &mut self,
         sender: &ProtocolAddress,
         distribution_id: Uuid,
         record: &SenderKeyRecord,
-        ctx: Context,
     ) -> Result<()> {
         self.sender_key_store
-            .store_sender_key(sender, distribution_id, record, ctx)
+            .store_sender_key(sender, distribution_id, record)
             .await
     }
 
@@ -443,10 +423,9 @@ impl traits::SenderKeyStore for InMemSignalProtocolStore {
         &mut self,
         sender: &ProtocolAddress,
         distribution_id: Uuid,
-        ctx: Context,
     ) -> Result<Option<SenderKeyRecord>> {
         self.sender_key_store
-            .load_sender_key(sender, distribution_id, ctx)
+            .load_sender_key(sender, distribution_id)
             .await
     }
 }

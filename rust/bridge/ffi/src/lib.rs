@@ -161,8 +161,7 @@ pub unsafe extern "C" fn signal_sealed_session_cipher_decrypt(
             &mut identity_store,
             &mut session_store,
             &mut prekey_store,
-            &mut signed_prekey_store,
-            Some(ctx),
+            &mut signed_prekey_store
         )
         .now_or_never()
         .expect("synchronous")?;

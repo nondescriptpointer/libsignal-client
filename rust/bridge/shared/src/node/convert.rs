@@ -495,7 +495,6 @@ impl<'a> AsyncArgTypeInfo<'a> for &'a [u8] {
     }
 }
 
-static_assertions::assert_type_eq_all!(libsignal_protocol::Context, Option<*mut std::ffi::c_void>);
 impl<'a> AsyncArgTypeInfo<'a> for *mut std::ffi::c_void {
     type ArgType = JsNull;
     type StoredType = ();

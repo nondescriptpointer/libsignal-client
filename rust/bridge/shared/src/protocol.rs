@@ -980,8 +980,7 @@ async fn SessionBuilder_ProcessPreKeyBundle(
     bundle: &PreKeyBundle,
     protocol_address: &ProtocolAddress,
     session_store: &mut dyn SessionStore,
-    identity_key_store: &mut dyn IdentityKeyStore,
-    ctx: Context,
+    identity_key_store: &mut dyn IdentityKeyStore
 ) -> Result<()> {
     let mut csprng = rand::rngs::OsRng;
     process_prekey_bundle(
@@ -989,8 +988,7 @@ async fn SessionBuilder_ProcessPreKeyBundle(
         session_store,
         identity_key_store,
         bundle,
-        &mut csprng,
-        ctx,
+        &mut csprng
     )
     .await
 }
@@ -1000,15 +998,13 @@ async fn SessionCipher_EncryptMessage(
     ptext: &[u8],
     protocol_address: &ProtocolAddress,
     session_store: &mut dyn SessionStore,
-    identity_key_store: &mut dyn IdentityKeyStore,
-    ctx: Context,
+    identity_key_store: &mut dyn IdentityKeyStore
 ) -> Result<CiphertextMessage> {
     message_encrypt(
         ptext,
         protocol_address,
         session_store,
-        identity_key_store,
-        ctx,
+        identity_key_store
     )
     .await
 }
@@ -1018,8 +1014,7 @@ async fn SessionCipher_DecryptSignalMessage(
     message: &SignalMessage,
     protocol_address: &ProtocolAddress,
     session_store: &mut dyn SessionStore,
-    identity_key_store: &mut dyn IdentityKeyStore,
-    ctx: Context,
+    identity_key_store: &mut dyn IdentityKeyStore
 ) -> Result<Vec<u8>> {
     let mut csprng = rand::rngs::OsRng;
     message_decrypt_signal(
@@ -1027,8 +1022,7 @@ async fn SessionCipher_DecryptSignalMessage(
         protocol_address,
         session_store,
         identity_key_store,
-        &mut csprng,
-        ctx,
+        &mut csprng
     )
     .await
 }
@@ -1040,8 +1034,7 @@ async fn SessionCipher_DecryptPreKeySignalMessage(
     session_store: &mut dyn SessionStore,
     identity_key_store: &mut dyn IdentityKeyStore,
     prekey_store: &mut dyn PreKeyStore,
-    signed_prekey_store: &mut dyn SignedPreKeyStore,
-    ctx: Context,
+    signed_prekey_store: &mut dyn SignedPreKeyStore
 ) -> Result<Vec<u8>> {
     let mut csprng = rand::rngs::OsRng;
     message_decrypt_prekey(
@@ -1051,8 +1044,7 @@ async fn SessionCipher_DecryptPreKeySignalMessage(
         identity_key_store,
         prekey_store,
         signed_prekey_store,
-        &mut csprng,
-        ctx,
+        &mut csprng
     )
     .await
 }
@@ -1061,11 +1053,10 @@ async fn SessionCipher_DecryptPreKeySignalMessage(
 async fn SealedSessionCipher_Encrypt(
     destination: &ProtocolAddress,
     content: &UnidentifiedSenderMessageContent,
-    identity_key_store: &mut dyn IdentityKeyStore,
-    ctx: Context,
+    identity_key_store: &mut dyn IdentityKeyStore
 ) -> Result<Vec<u8>> {
     let mut rng = rand::rngs::OsRng;
-    sealed_sender_encrypt_from_usmc(destination, content, identity_key_store, ctx, &mut rng).await
+    sealed_sender_encrypt_from_usmc(destination, content, identity_key_store, &mut rng).await
 }
 
 #[bridge_fn_buffer(jni = "SealedSessionCipher_1MultiRecipientEncrypt", node = false)]
@@ -1074,7 +1065,6 @@ async fn SealedSender_MultiRecipientEncrypt(
     recipient_sessions: &[&SessionRecord],
     content: &UnidentifiedSenderMessageContent,
     identity_key_store: &mut dyn IdentityKeyStore,
-    ctx: Context,
 ) -> Result<Vec<u8>> {
     let mut rng = rand::rngs::OsRng;
     sealed_sender_multi_recipient_encrypt(
@@ -1082,7 +1072,6 @@ async fn SealedSender_MultiRecipientEncrypt(
         recipient_sessions,
         content,
         identity_key_store,
-        ctx,
         &mut rng,
     )
     .await
@@ -1095,7 +1084,6 @@ async fn SealedSender_MultiRecipientEncryptNode(
     recipient_sessions: &[SessionRecord],
     content: &UnidentifiedSenderMessageContent,
     identity_key_store: &mut dyn IdentityKeyStore,
-    ctx: Context,
 ) -> Result<Vec<u8>> {
     let mut rng = rand::rngs::OsRng;
     sealed_sender_multi_recipient_encrypt(
@@ -1103,7 +1091,6 @@ async fn SealedSender_MultiRecipientEncryptNode(
         &recipient_sessions.iter().collect::<Vec<&SessionRecord>>(),
         content,
         identity_key_store,
-        ctx,
         &mut rng,
     )
     .await
@@ -1123,9 +1110,8 @@ fn SealedSender_MultiRecipientMessageForSingleRecipient(
 async fn SealedSessionCipher_DecryptToUsmc(
     ctext: &[u8],
     identity_store: &mut dyn IdentityKeyStore,
-    ctx: Context,
 ) -> Result<UnidentifiedSenderMessageContent> {
-    sealed_sender_decrypt_to_usmc(ctext, identity_store, ctx).await
+    sealed_sender_decrypt_to_usmc(ctext, identity_store).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1153,7 +1139,6 @@ async fn SealedSender_DecryptMessage(
         session_store,
         prekey_store,
         signed_prekey_store,
-        None,
     )
     .await
 }
@@ -1162,11 +1147,10 @@ async fn SealedSender_DecryptMessage(
 async fn SenderKeyDistributionMessage_Create(
     sender: &ProtocolAddress,
     distribution_id: Uuid,
-    store: &mut dyn SenderKeyStore,
-    ctx: Context,
+    store: &mut dyn SenderKeyStore
 ) -> Result<SenderKeyDistributionMessage> {
     let mut csprng = rand::rngs::OsRng;
-    create_sender_key_distribution_message(sender, distribution_id, store, &mut csprng, ctx).await
+    create_sender_key_distribution_message(sender, distribution_id, store, &mut csprng).await
 }
 
 #[bridge_fn_void(
@@ -1177,9 +1161,8 @@ async fn SenderKeyDistributionMessage_Process(
     sender: &ProtocolAddress,
     sender_key_distribution_message: &SenderKeyDistributionMessage,
     store: &mut dyn SenderKeyStore,
-    ctx: Context,
 ) -> Result<()> {
-    process_sender_key_distribution_message(sender, sender_key_distribution_message, store, ctx)
+    process_sender_key_distribution_message(sender, sender_key_distribution_message, store)
         .await
 }
 
@@ -1189,10 +1172,9 @@ async fn GroupCipher_EncryptMessage(
     distribution_id: Uuid,
     message: &[u8],
     store: &mut dyn SenderKeyStore,
-    ctx: Context,
 ) -> Result<CiphertextMessage> {
     let mut rng = rand::rngs::OsRng;
-    let ctext = group_encrypt(store, sender, distribution_id, message, &mut rng, ctx).await?;
+    let ctext = group_encrypt(store, sender, distribution_id, message, &mut rng).await?;
     Ok(CiphertextMessage::SenderKeyMessage(ctext))
 }
 
@@ -1201,7 +1183,6 @@ async fn GroupCipher_DecryptMessage(
     sender: &ProtocolAddress,
     message: &[u8],
     store: &mut dyn SenderKeyStore,
-    ctx: Context,
 ) -> Result<Vec<u8>> {
-    group_decrypt(message, store, sender, ctx).await
+    group_decrypt(message, store, sender).await
 }
