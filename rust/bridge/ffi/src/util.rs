@@ -55,6 +55,8 @@ pub enum SignalErrorCode {
     CallbackError = 100,
 
     VerificationFailure = 110,
+
+    DatabaseStoreError = 200,
 }
 
 impl From<&SignalFfiError> for SignalErrorCode {
@@ -180,6 +182,10 @@ impl From<&SignalFfiError> for SignalErrorCode {
 
             SignalFfiError::ZkGroupDeserializationFailure(ZkGroupDeserializationFailure) => {
                 SignalErrorCode::InvalidType
+            }
+
+            SignalFfiError::Signal(SignalProtocolError::DatabaseStoreError(_)) => {
+                SignalErrorCode::DatabaseStoreError
             }
         }
     }

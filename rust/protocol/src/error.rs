@@ -89,4 +89,7 @@ pub enum SignalProtocolError {
     UnknownSealedSenderVersion(u8),
     /// self send of a sealed sender message
     SealedSenderSelfSend,
+
+    /// database store error
+    DatabaseStoreError(String),
 }

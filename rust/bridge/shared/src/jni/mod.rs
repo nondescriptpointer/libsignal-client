@@ -288,6 +288,10 @@ fn throw_error(env: &JNIEnv, error: SignalJniError) {
             unreachable!("already handled in prior match")
         }
 
+        SignalJniError::Signal(SignalProtocolError::DatabaseStoreError(_)) => {
+            jni_class_name!(org.signal.libsignal.protocol.Database)
+        }
+
         SignalJniError::HsmEnclave(HsmEnclaveError::HSMHandshakeError(_))
         | SignalJniError::HsmEnclave(HsmEnclaveError::HSMCommunicationError(_)) => {
             jni_class_name!(
