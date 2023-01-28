@@ -91,7 +91,7 @@ fn group_using_context_arg() -> Result<(), SignalProtocolError> {
 
         let x = Box::new(1);
 
-        let context = Some(Box::into_raw(x) as _);
+        let context = None;
 
         let mut alice_store = ContextUsingSenderKeyStore::new(context);
 

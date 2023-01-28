@@ -12,7 +12,8 @@ use crate::{
     SessionRecord, SignedPreKeyRecord,
 };
 
-pub type Context = Option<*mut std::ffi::c_void>;
+//pub type Context = Option<*mut std::ffi::c_void>;
+pub type Context = Option<()>;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Direction {
