@@ -13,7 +13,7 @@ use unzip3::Unzip3;
 use crate::ResultKind;
 
 pub(crate) fn bridge_fn(name: String, sig: &Signature, result_kind: ResultKind) -> TokenStream2 {
-    let name = format_ident!("Java_org_signal_client_internal_Native_{}", name);
+    let name = format_ident!("Java_org_signal_libsignal_internal_Native_{}", name);
 
     let output = match (result_kind, &sig.output) {
         (ResultKind::Regular, ReturnType::Default) => quote!(),
@@ -63,7 +63,7 @@ pub(crate) fn bridge_fn(name: String, sig: &Signature, result_kind: ResultKind) 
                 } else {
                     (
                         Ident::new("unexpected", pat.span()),
-                        Error::new(pat.span(), "cannot use patterns in paramater")
+                        Error::new(pat.span(), "cannot use patterns in parameter")
                             .to_compile_error(),
                         quote!(),
                     )
@@ -92,5 +92,5 @@ pub(crate) fn bridge_fn(name: String, sig: &Signature, result_kind: ResultKind) 
 }
 
 pub(crate) fn name_from_ident(ident: &Ident) -> String {
-    ident.to_string().replace("_", "_1")
+    ident.to_string().replace('_', "_1")
 }

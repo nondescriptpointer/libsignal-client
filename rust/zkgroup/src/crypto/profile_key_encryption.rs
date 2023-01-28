@@ -14,31 +14,34 @@ use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
 use serde::{Deserialize, Serialize};
 
-use curve25519_dalek::subtle::Choice;
-use curve25519_dalek::subtle::ConditionallySelectable;
-use curve25519_dalek::subtle::ConstantTimeEq;
+use curve25519_dalek::subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
-use ZkGroupError::*;
+use lazy_static::lazy_static;
 
-#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
+lazy_static! {
+    static ref SYSTEM_PARAMS: SystemParams =
+        bincode::deserialize::<SystemParams>(&SystemParams::SYSTEM_HARDCODED).unwrap();
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SystemParams {
     pub(crate) G_b1: RistrettoPoint,
     pub(crate) G_b2: RistrettoPoint,
 }
 
-#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeyPair {
     pub(crate) b1: Scalar,
     pub(crate) b2: Scalar,
     pub(crate) B: RistrettoPoint,
 }
 
-#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicKey {
     pub(crate) B: RistrettoPoint,
 }
 
-#[derive(Copy, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ciphertext {
     pub(crate) E_B1: RistrettoPoint,
     pub(crate) E_B2: RistrettoPoint,
@@ -56,7 +59,7 @@ impl SystemParams {
     }
 
     pub fn get_hardcoded() -> SystemParams {
-        bincode::deserialize::<SystemParams>(&SystemParams::SYSTEM_HARDCODED).unwrap()
+        *SYSTEM_PARAMS
     }
 
     const SYSTEM_HARDCODED: [u8; 64] = [
@@ -85,15 +88,14 @@ impl KeyPair {
         Ciphertext { E_B1, E_B2 }
     }
 
-    // Might return DecryptionFailure
     #[allow(clippy::needless_range_loop)]
     pub fn decrypt(
         &self,
         ciphertext: Ciphertext,
         uid_bytes: UidBytes,
-    ) -> Result<profile_key_struct::ProfileKeyStruct, ZkGroupError> {
+    ) -> Result<profile_key_struct::ProfileKeyStruct, ZkGroupVerificationFailure> {
         if ciphertext.E_B1 == RISTRETTO_BASEPOINT_POINT {
-            return Err(DecryptionFailure);
+            return Err(ZkGroupVerificationFailure);
         }
         let M4 = ciphertext.E_B2 - (self.b2 * ciphertext.E_B1);
         let (mask, candidates) = M4.decode_253_bits();
@@ -126,7 +128,7 @@ impl KeyPair {
         if n_found == 1 {
             Ok(retval)
         } else {
-            Err(DecryptionFailure)
+            Err(ZkGroupVerificationFailure)
         }
     }
 

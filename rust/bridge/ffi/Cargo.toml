@@ -5,8 +5,8 @@
 
 [package]
 name = "libsignal-ffi"
-version = "0.12.0"
-authors = ["Jack Lloyd <jack@signal.org>"]
+version = "0.21.1"
+authors = ["Signal Messenger LLC"]
 edition = "2018"
 license = "AGPL-3.0-only"
 
@@ -21,7 +21,7 @@ armv8 = ["libsignal-protocol/armv8", "signal-crypto/armv8"]
 [dependencies]
 libsignal-protocol = { path = "../../protocol" }
 device-transfer = { path = "../../device-transfer" }
-hsm-enclave = { path = "../../hsm-enclave" }
+attest = { path = "../../attest" }
 signal-crypto = { path = "../../crypto" }
 zkgroup = { path = "../../zkgroup" }
 libsignal-bridge = { path = "../shared", features = ["ffi"] }
@@ -31,4 +31,4 @@ futures-util = "0.3"
 libc = "0.2"
 rand = "0.7.3"
 log = "0.4"
-log-panics = { version = "2.0.0", features = ["with-backtrace"] }
+log-panics = { version = "2.1.0", features = ["with-backtrace"] }

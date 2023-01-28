@@ -1,5 +1,5 @@
 //
-// Copyright 2021 Signal Messenger, LLC.
+// Copyright 2021-2022 Signal Messenger, LLC.
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 
@@ -87,7 +87,7 @@ fn HKDF_Derive(output: &mut [u8], ikm: &[u8], label: &[u8], salt: &[u8]) -> Resu
 
 #[bridge_fn(ffi = "address_new")]
 fn ProtocolAddress_New(name: String, device_id: u32) -> ProtocolAddress {
-    ProtocolAddress::new(name, device_id)
+    ProtocolAddress::new(name, device_id.into())
 }
 
 #[bridge_fn(ffi = "publickey_deserialize", jni = false)]
@@ -256,11 +256,6 @@ fn SignalMessage_Deserialize(data: &[u8]) -> Result<SignalMessage> {
     SignalMessage::try_from(data)
 }
 
-#[bridge_fn_buffer(ffi = false, node = false)]
-fn SignalMessage_GetSenderRatchetKey(m: &SignalMessage) -> Vec<u8> {
-    m.sender_ratchet_key().serialize().into_vec()
-}
-
 bridge_get_buffer!(SignalMessage::body -> &[u8], ffi = "message_get_body");
 bridge_get_buffer!(SignalMessage::serialized -> &[u8], ffi = "message_get_serialized");
 bridge_get!(SignalMessage::counter -> u32, ffi = "message_get_counter");
@@ -303,8 +298,8 @@ fn SignalMessage_VerifyMac(
     )
 }
 
-#[bridge_fn(ffi = "message_get_sender_ratchet_key", jni = false, node = false)]
-fn Message_GetSenderRatchetKey(m: &SignalMessage) -> PublicKey {
+#[bridge_fn(ffi = "message_get_sender_ratchet_key", node = false)]
+fn SignalMessage_GetSenderRatchetKey(m: &SignalMessage) -> PublicKey {
     *m.sender_ratchet_key()
 }
 
@@ -321,25 +316,25 @@ fn PreKeySignalMessage_New(
     PreKeySignalMessage::new(
         message_version,
         registration_id,
-        pre_key_id,
-        signed_pre_key_id,
+        pre_key_id.map(|id| id.into()),
+        signed_pre_key_id.into(),
         *base_key,
         IdentityKey::new(*identity_key),
         signal_message.clone(),
     )
 }
 
-#[bridge_fn(jni = false, node = false)]
+#[bridge_fn(node = false)]
 fn PreKeySignalMessage_GetBaseKey(m: &PreKeySignalMessage) -> PublicKey {
     *m.base_key()
 }
 
-#[bridge_fn(jni = false, node = false)]
+#[bridge_fn(node = false)]
 fn PreKeySignalMessage_GetIdentityKey(m: &PreKeySignalMessage) -> PublicKey {
     *m.identity_key().public_key()
 }
 
-#[bridge_fn(jni = false, node = false)]
+#[bridge_fn(node = false)]
 fn PreKeySignalMessage_GetSignalMessage(m: &PreKeySignalMessage) -> SignalMessage {
     m.message().clone()
 }
@@ -349,25 +344,6 @@ bridge_get_buffer!(
     PreKeySignalMessage::serialized as Serialize -> &[u8],
     jni = "PreKeySignalMessage_1GetSerialized"
 );
-
-#[bridge_fn_buffer(ffi = false, jni = "PreKeySignalMessage_1GetBaseKey", node = false)]
-fn PreKeySignalMessage_GetBaseKeySerialized(m: &PreKeySignalMessage) -> Vec<u8> {
-    m.base_key().serialize().into_vec()
-}
-
-#[bridge_fn_buffer(ffi = false, jni = "PreKeySignalMessage_1GetIdentityKey", node = false)]
-fn PreKeySignalMessage_GetIdentityKeySerialized(m: &PreKeySignalMessage) -> Vec<u8> {
-    m.identity_key().serialize().into_vec()
-}
-
-#[bridge_fn_buffer(
-    ffi = false,
-    jni = "PreKeySignalMessage_1GetSignalMessage",
-    node = false
-)]
-fn PreKeySignalMessage_GetSignalMessageSerialized(m: &PreKeySignalMessage) -> &[u8] {
-    m.message().serialized()
-}
 
 bridge_get!(PreKeySignalMessage::registration_id -> u32);
 bridge_get!(PreKeySignalMessage::signed_pre_key_id -> u32);
@@ -414,17 +390,6 @@ fn SenderKeyMessage_VerifySignature(skm: &SenderKeyMessage, pubkey: &PublicKey) 
 bridge_deserialize!(SenderKeyDistributionMessage::try_from);
 bridge_get_buffer!(SenderKeyDistributionMessage::chain_key -> &[u8]);
 
-#[bridge_fn_buffer(
-    ffi = false,
-    jni = "SenderKeyDistributionMessage_1GetSignatureKey",
-    node = false
-)]
-fn SenderKeyDistributionMessage_GetSignatureKeySerialized(
-    m: &SenderKeyDistributionMessage,
-) -> Result<Vec<u8>> {
-    Ok(m.signing_key()?.serialize().into_vec())
-}
-
 bridge_get_buffer!(
     SenderKeyDistributionMessage::serialized as Serialize -> &[u8],
     jni = "SenderKeyDistributionMessage_1GetSerialized"
@@ -453,7 +418,7 @@ fn SenderKeyDistributionMessage_New(
     )
 }
 
-#[bridge_fn(jni = false, node = false)]
+#[bridge_fn(node = false)]
 fn SenderKeyDistributionMessage_GetSignatureKey(
     m: &SenderKeyDistributionMessage,
 ) -> Result<PublicKey> {
@@ -531,9 +496,9 @@ fn PreKeyBundle_New(
 ) -> Result<PreKeyBundle> {
     let identity_key = IdentityKey::new(*identity_key);
 
-    let prekey = match (prekey, prekey_id) {
+    let prekey: Option<(PreKeyId, PublicKey)> = match (prekey, prekey_id) {
         (None, None) => None,
-        (Some(k), Some(id)) => Some((id, *k)),
+        (Some(k), Some(id)) => Some((id.into(), *k)),
         _ => {
             return Err(SignalProtocolError::InvalidArgument(
                 "Must supply both or neither of prekey and prekey_id".to_owned(),
@@ -543,9 +508,9 @@ fn PreKeyBundle_New(
 
     PreKeyBundle::new(
         registration_id,
-        device_id,
+        device_id.into(),
         prekey,
-        signed_prekey_id,
+        signed_prekey_id.into(),
         *signed_prekey,
         signed_prekey_signature.to_vec(),
         identity_key,
@@ -585,7 +550,7 @@ fn SignedPreKeyRecord_New(
     signature: &[u8],
 ) -> SignedPreKeyRecord {
     let keypair = KeyPair::new(*pub_key, *priv_key);
-    SignedPreKeyRecord::new(id, timestamp.as_millis(), &keypair, signature)
+    SignedPreKeyRecord::new(id.into(), timestamp.as_millis(), &keypair, signature)
 }
 
 bridge_deserialize!(PreKeyRecord::deserialize);
@@ -600,7 +565,7 @@ bridge_get!(PreKeyRecord::private_key -> PrivateKey);
 #[bridge_fn]
 fn PreKeyRecord_New(id: u32, pub_key: &PublicKey, priv_key: &PrivateKey) -> PreKeyRecord {
     let keypair = KeyPair::new(*pub_key, *priv_key);
-    PreKeyRecord::new(id, &keypair)
+    PreKeyRecord::new(id.into(), &keypair)
 }
 
 bridge_deserialize!(SenderKeyRecord::deserialize);
@@ -608,11 +573,6 @@ bridge_get_buffer!(
     SenderKeyRecord::serialize as Serialize -> Vec<u8>,
     jni = "SenderKeyRecord_1GetSerialized"
 );
-
-#[bridge_fn(ffi = "sender_key_record_new_fresh")]
-fn SenderKeyRecord_New() -> SenderKeyRecord {
-    SenderKeyRecord::new_empty()
-}
 
 bridge_deserialize!(ServerCertificate::deserialize);
 bridge_get_buffer!(ServerCertificate::serialized -> &[u8]);
@@ -671,7 +631,7 @@ fn SenderCertificate_New(
         sender_uuid,
         sender_e164,
         *sender_key,
-        sender_device_id,
+        sender_device_id.into(),
         expiration.as_millis(),
         signer_cert.clone(),
         signer_key,
@@ -853,16 +813,7 @@ fn SessionRecord_CurrentRatchetKeyMatches(s: &SessionRecord, key: &PublicKey) ->
     s.current_ratchet_key_matches(key)
 }
 
-#[bridge_fn_void]
-fn SessionRecord_SetNeedsPniSignature(
-    s: &mut SessionRecord,
-    needs_pni_signature: bool,
-) -> Result<()> {
-    s.set_needs_pni_signature(needs_pni_signature)
-}
-
 bridge_get!(SessionRecord::has_current_session_state as HasCurrentState -> bool, jni = false);
-bridge_get!(SessionRecord::needs_pni_signature as NeedsPniSignature -> bool);
 
 bridge_deserialize!(SessionRecord::deserialize);
 bridge_get_buffer!(SessionRecord::serialize as Serialize -> Vec<u8>);
@@ -902,8 +853,9 @@ fn SessionRecord_GetReceiverChainKeyValue(
     session_state: &SessionRecord,
     key: &PublicKey,
 ) -> Result<Option<Vec<u8>>> {
-    let chain_key = session_state.get_receiver_chain_key(key)?;
-    Ok(chain_key.map(|ck| ck.key().to_vec()))
+    Ok(session_state
+        .get_receiver_chain_key_bytes(key)?
+        .map(Vec::from))
 }
 
 #[bridge_fn(ffi = false, node = false)]
@@ -1114,8 +1066,9 @@ fn SealedSender_MultiRecipientMessageForSingleRecipient(
     encoded_multi_recipient_message: &[u8],
 ) -> Result<Vec<u8>> {
     let messages = sealed_sender_multi_recipient_fan_out(encoded_multi_recipient_message)?;
-    let [single_message] = <[_; 1]>::try_from(messages)
-        .map_err(|_| SignalProtocolError::InvalidMessage("encoded for more than one recipient"))?;
+    let [single_message] = <[_; 1]>::try_from(messages).map_err(|_| {
+        SignalProtocolError::InvalidArgument("encoded for more than one recipient".to_owned())
+    })?;
     Ok(single_message)
 }
 
@@ -1148,7 +1101,7 @@ async fn SealedSender_DecryptMessage(
         timestamp.as_millis(),
         local_e164,
         local_uuid,
-        local_device_id,
+        local_device_id.into(),
         identity_store,
         session_store,
         prekey_store,

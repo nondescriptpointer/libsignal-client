@@ -26,9 +26,10 @@ pub fn describe_panic(any: &Box<dyn std::any::Any + Send>) -> String {
 ///
 /// Full form:
 ///
-/// ```no_run
+/// ```ignore
 /// # #[macro_use] extern crate libsignal_bridge;
 /// # struct Foo;
+/// # #[cfg(ignore_even_when_running_all_tests)]
 /// bridge_handle!(Foo, clone = true, mut = true, ffi = "foo", jni = "Foo", node = "Foo");
 /// ```
 ///
@@ -67,7 +68,7 @@ pub fn describe_panic(any: &Box<dyn std::any::Any + Send>) -> String {
 ///
 /// - Node: boxed values use Neon's [`JsBox`][] type, but this is only used for return values.
 ///   Arguments are always in the form of a JavaScript object with a `_nativeHandle` property that
-///   refers to the box. The type inside the box may not directy be a `Foo` on the Rust side;
+///   refers to the box. The type inside the box may not directly be a `Foo` on the Rust side;
 ///   that's an implementation detail.
 ///
 ///   For TypeScript's benefit, each boxed type gets its own unique `interface Foo`, and the
@@ -89,7 +90,7 @@ macro_rules! bridge_handle {
 ///
 /// Example:
 ///
-/// ```no_run
+/// ```ignore
 /// # #[macro_use] extern crate libsignal_bridge_macros;
 /// # struct Foo;
 /// # impl Foo {
@@ -97,7 +98,8 @@ macro_rules! bridge_handle {
 /// #         Err(())
 /// #     }
 /// # }
-///
+/// #
+/// # #[cfg(ignore_even_when_running_all_tests)]
 /// bridge_deserialize!(Foo::try_from); // generates Foo_Deserialize
 /// ```
 ///
@@ -122,7 +124,7 @@ macro_rules! bridge_deserialize {
 ///
 /// Example:
 ///
-/// ```no_run
+/// ```ignore
 /// # #[macro_use] extern crate libsignal_bridge_macros;
 /// # struct Foo;
 /// # impl Foo {
@@ -130,7 +132,8 @@ macro_rules! bridge_deserialize {
 /// #         Err(())
 /// #     }
 /// # }
-///
+/// #
+/// # #[cfg(ignore_even_when_running_all_tests)]
 /// bridge_get_buffer!(Foo::payload -> Vec<u8>); // generates Foo_GetPayload
 /// ```
 ///
@@ -159,7 +162,7 @@ macro_rules! bridge_get_buffer {
 ///
 /// Full form:
 ///
-/// ```no_run
+/// ```ignore
 /// # #[macro_use] extern crate libsignal_bridge;
 /// # struct Foo;
 /// impl Foo {
@@ -169,6 +172,7 @@ macro_rules! bridge_get_buffer {
 ///     }
 /// }
 ///
+/// # #[cfg(ignore_even_when_running_all_tests)]
 /// bridge_get!(Foo::bar as GetBar -> &str, ffi = "foo_get_bar", jni = "Foo_GetBar", node = "Foo_GetBar");
 /// ```
 ///
@@ -177,7 +181,7 @@ macro_rules! bridge_get_buffer {
 ///
 /// Roughly equivalent to
 ///
-/// ```no_run
+/// ```ignore
 /// # #[macro_use] extern crate libsignal_bridge_macros;
 /// # struct Foo;
 /// # impl Foo {
@@ -186,6 +190,7 @@ macro_rules! bridge_get_buffer {
 /// #     }
 /// # }
 ///
+/// # #[cfg(ignore_even_when_running_all_tests)]
 /// #[bridge_fn]
 /// fn Foo_GetBar(obj: &Foo) -> Result<&str> {
 ///   Foo::bar(obj)   
